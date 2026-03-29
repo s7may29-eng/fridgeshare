@@ -1,8 +1,11 @@
 import { useAppState } from './useAppState';
 import BoxIcon from './BoxIcon';
 import BoxForm from './BoxForm';
+import HomeScreen from './HomeScreen';
+import BoxScreen from './BoxScreen';
+import SubScreens from './SubScreens';
 import { GUIDE_STEPS, CAT_COLOR_OPTIONS, CAT_ICON_OPTIONS, CSS } from './constants';
-import { lsSet, isExpired, isExpiringSoon } from './utils';
+import { lsSet } from './utils';
 
 const accent = '#6366f1';
 const accentLight = '#eef2ff';
@@ -32,8 +35,9 @@ export default function App() {
   const state = useAppState();
   const {
     screen, setScreen, users, boxes, session, currentBox, setCurrentBox,
-    currentUser, editingItem, editingBox, setEditingBox, toast, authMode, setAuthMode,
-    form, setForm, filterCat, setFilterCat, filterType, setFilterType, sortBy, setSortBy,
+    currentUser, editingItem, setEditingItem, editingBox, setEditingBox, toast,
+    authMode, setAuthMode, form, setForm,
+    filterCat, setFilterCat, filterType, setFilterType, sortBy, setSortBy,
     inviteInput, setInviteInput, loading, confirmDelete, setConfirmDelete,
     geminiKey, setGeminiKey, scanning, scanMsg, scannedItems, setScannedItems,
     showAddMenu, setShowAddMenu, guideStep, setGuideStep, showCode, setShowCode,
@@ -49,6 +53,29 @@ export default function App() {
     handleEstimateExpiry, handleBarcode, handleReceipt, handleShortageBarcode,
     confirmAndAddScanned, getItemEmoji,
   } = state;
+
+  const commonProps = {
+    S, accent, accentLight, danger, warn, text, textMuted, border, cardBg,
+    users, boxes, session, currentBox, setCurrentBox,
+    currentUser, editingItem, setEditingItem, editingBox, setEditingBox,
+    authMode, setAuthMode, form, setForm,
+    filterCat, setFilterCat, filterType, setFilterType, sortBy, setSortBy,
+    inviteInput, setInviteInput, loading, confirmDelete, setConfirmDelete,
+    geminiKey, setGeminiKey, scanning, scanMsg, scannedItems, setScannedItems,
+    showAddMenu, setShowAddMenu, guideStep, setGuideStep, showCode, setShowCode,
+    newCatName, setNewCatName, newCatIcon, setNewCatIcon, newCatColor, setNewCatColor,
+    shortageForm, setShortageForm, showShortageAdd, setShowShortageAdd,
+    buyingItem, setBuyingItem, buyBoxId, setBuyBoxId, estimatingExpiry,
+    receiptRef, barcodeRef, shortageBarcodeRef,
+    cats, catIcons, catColors, box, boxEnabledCats, boxItems, shortageItems,
+    visibleBoxes, filteredItems, expiredAll, expiringAll,
+    showToast, saveSession, addCat, deleteCat, addShortage, removeShortage,
+    handleBought, handleRegister, handleLogin, handleLogout, addFriend,
+    createBox, updateBox, addItem, updateItem, deleteItem, openEditItem,
+    handleEstimateExpiry, handleBarcode, handleReceipt, handleShortageBarcode,
+    confirmAndAddScanned, getItemEmoji,
+    setScreen, lsSet,
+  };
 
   if (screen === 'loading') return (
     <div style={{ ...S.app, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -74,8 +101,39 @@ export default function App() {
             {GUIDE_STEPS.map((_, i) => <div key={i} style={{ width: i === guideStep ? 20 : 6, height: 6, borderRadius: 3, background: i === guideStep ? accent : border, transition: 'all 0.3s' }} />)}
           </div>
           {guideStep < GUIDE_STEPS.length - 1
-            ? <button className='pressable' style={S.btn()} onClick={() => setGuideStep(guideStep + 1)}>次へ →</button>
+            ? <button className='pressable' style={S.btn()} onClick={() => setGuideStep(guideStep + 1)}>次へ</button>
             : <button className='pressable' style={S.btn()} onClick={() => setScreen('home')}>はじめる！</button>
           }
-          {guideStep > 0 && <button className='pressable' style={S.btnGhost} onClick={() => setGuideStep(guideStep - 1)}>← 戻る</button>}
-          <button onClick={() => setScreen('home')} style={{ background​​​​​​​​​​​​​​​​
+          {guideStep > 0 && <button className='pressable' style={S.btnGhost} onClick={() => setGuideStep(guideStep - 1)}>戻る</button>}
+          <button onClick={() => setScreen('home')} style={{ background: 'none', border: 'none', color: textMuted, fontSize: 13, cursor: 'pointer', marginTop: 12, fontFamily: 'inherit' }}>スキップ</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (screen === 'home') return (
+    <>
+      <style>{CSS}</style>
+      <HomeScreen {...commonProps} />
+      {toast && <div style={S.toast(toast.type)}>{toast.msg}</div>}
+    </>
+  );
+
+  if (['box', 'addItem', 'editItem', 'scanResult'].includes(screen)) return (
+    <>
+      <style>{CSS}</style>
+      <BoxScreen {...commonProps} screen={screen} />
+      {toast && <div style={S.toast(toast.type)}>{toast.msg}</div>}
+    </>
+  );
+
+  if (['auth', 'settings', 'catSettings', 'editBox'].includes(screen)) return (
+    <>
+      <style>{CSS}</style>
+      <SubScreens {...commonProps} screen={screen} />
+      {toast && <div style={S.toast(toast.type)}>{toast.msg}</div>}
+    </>
+  );
+
+  return null;
+}
