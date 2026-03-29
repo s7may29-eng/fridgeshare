@@ -3,7 +3,7 @@ import { db } from './firebase';
 import { ref, set, get, onValue, update, remove } from 'firebase/database';
 import { genId, genCode, today, hashPassword, lsGet, lsSet } from './utils';
 import { lookupBarcode, analyzeReceipt, estimateExpiry } from './api';
-import { DEFAULT_ALL_CATS, DEFAULT_CAT_ICONS, DEFAULT_CAT_COLORS } from './constants';
+import { DEFAULT_ALL_CATS, DEFAULT_CAT_ICONS, DEFAULT_CAT_COLORS, BOX_DEFAULT_CATS } from './constants';
 
 export function useAppState() {
   const [screen, setScreen] = useState('loading');
@@ -54,6 +54,60 @@ export function useAppState() {
   const catIcons = userCats ? Object.fromEntries(userCats.map(c => [c.name, c.icon])) : DEFAULT_CAT_ICONS;
   const catColors = userCats ? Object.fromEntries(userCats.map(c => [c.name, c.color])) : DEFAULT_CAT_COLORS;
 
+  // 品名から絵文字を返す
+  const getItemEmoji = (name) => {
+    if (!name) return null;
+    const n = name.toLowerCase();
+    const map = [
+      ['りんご','🍎'],['みかん','🍊'],['バナナ','🍌'],['ぶどう','🍇'],['いちご','🍓'],
+      ['もも','🍑'],['すいか','🍉'],['メロン','🍈'],['なし','🍐'],['さくらんぼ','🍒'],
+      ['レモン','🍋'],['パイナップル','🍍'],['マンゴー','🥭'],['ブルーベリー','🫐'],
+      ['トマト','🍅'],['にんじん','🥕'],['ブロッコリー','🥦'],['たまねぎ','🧅'],
+      ['にんにく','🧄'],['じゃがいも','🥔'],['さつまいも','🍠'],['とうもろこし','🌽'],
+      ['きゅうり','🥒'],['なす','🍆'],['アボカド','🥑'],['ほうれん草','🥬'],
+      ['レタス','🥬'],['キャベツ','🥬'],['きのこ','🍄'],['しいたけ','🍄'],
+      ['ピーマン','🫑'],['とうがらし','🌶️'],['しょうが','🫚'],
+      ['たまご','🥚'],['卵','🥚'],['牛乳','🥛'],['ミルク','🥛'],['チーズ','🧀'],
+      ['バター','🧈'],['ヨーグルト','🥛'],
+      ['鶏肉','🍗'],['とりにく','🍗'],['牛肉','🥩'],['ぎゅうにく','🥩'],
+      ['豚肉','🥩'],['ぶたにく','🥩'],['ひき肉','🥩'],['サーモン','🐟'],
+      ['まぐろ','🐟'],['さけ','🐟'],['えび','🦐'],['いか','🦑'],['たこ','🐙'],
+      ['あさり','🦪'],['しじみ','🦪'],
+      ['パン','🍞'],['食パン','🍞'],['米','🍚'],['ごはん','🍚'],['麺','🍜'],
+      ['パスタ','🍝'],['うどん','🍜'],['そば','🍜'],['ラーメン','🍜'],
+      ['豆腐','🫘'],['納豆','🫘'],['みそ','🫙'],['しょうゆ','🫙'],
+      ['ケチャップ','🫙'],['マヨネーズ','🫙'],['ソース','🫙'],['酢','🫙'],
+      ['砂糖','🫙'],['塩','🧂'],['こしょう','🧂'],['油','🫙'],
+      ['コーヒー','☕'],['お茶','🍵'],['紅茶','🍵'],['緑茶','🍵'],
+      ['ジュース','🧃'],['水','💧'],['炭酸','🥤'],['コーラ','🥤'],
+      ['ビール','🍺'],['ワイン','🍷'],['日本酒','🍶'],['ウイスキー','🥃'],
+      ['アイス','🍦'],['チョコ','🍫'],['クッキー','🍪'],['ケーキ','🎂'],
+      ['シャンプー','🧴'],['リンス','🧴'],['洗剤','🧼'],['石けん','🧼'],
+      ['歯ブラシ','🪥'],['歯磨き','🪥'],['ティッシュ','🧻'],['トイレットペーパー','🧻'],
+      ['電池','🔋'],['電球','💡'],['薬','💊'],['マスク','😷'],
+    ];
+    for (const [kw, emoji] of map) {
+      if (n.includes(kw)) return emoji;
+    }
+    return null;
+  };
+
+  // 自動マイグレーション：enabledCatsが未設定のボックスにデフォルトを設定
+  const migrateBoxes = async (boxesData) => {
+    const updates = {};
+    for (const box of Object.values(boxesData)) {
+      if (!box.enabledCats) {
+        const defaultCats = BOX_DEFAULT_CATS[box.icon] || DEFAULT_ALL_CATS;
+        const defaultCat = defaultCats[0];
+        updates['boxes/' + box.id + '/enabledCats'] = defaultCats;
+        updates['boxes/' + box.id + '/defaultCat'] = defaultCat;
+      }
+    }
+    if (Object.keys(updates).length > 0) {
+      await update(ref(db), updates);
+    }
+  };
+
   useEffect(() => {
     const s = lsGet('hs-session', null);
     const k = lsGet('hs-gemini', '') || lsGet('fs-gemini-key', '');
@@ -63,7 +117,11 @@ export function useAppState() {
       setCurrentBox(null);
       onValue(ref(db, 'users/' + s.userId), snap => { if (snap.val()) setCurrentUser(snap.val()); });
       onValue(ref(db, 'users'), snap => { if (snap.val()) setUsers(snap.val()); });
-      onValue(ref(db, 'boxes'), snap => { setBoxes(snap.val() || {}); });
+      onValue(ref(db, 'boxes'), snap => {
+        const data = snap.val() || {};
+        setBoxes(data);
+        migrateBoxes(data);
+      });
       onValue(ref(db, 'friends/' + s.userId), snap => { setFriends(snap.val() || {}); });
       onValue(ref(db, 'userCats/' + s.userId), snap => { setUserCats(snap.val() || null); });
       onValue(ref(db, 'shortageList/' + s.userId), snap => { setShortageList(snap.val() || {}); });
@@ -186,11 +244,14 @@ export function useAppState() {
   const createBox = async () => {
     if (!form.boxName?.trim()) return showToast('名前を入力してください', 'error');
     const id = genId();
+    const icon = form.boxIcon || 'fridge';
+    const defaultEnabledCats = BOX_DEFAULT_CATS[icon] || cats;
+    const defaultCat = form.defaultCat || defaultEnabledCats[0] || cats[0] || '食料品その他';
     await set(ref(db, 'boxes/' + id), {
-      id, name: form.boxName.trim(), icon: form.boxIcon || 'fridge',
+      id, name: form.boxName.trim(), icon,
       ownerId: session.userId, createdAt: Date.now(),
-      defaultCat: form.defaultCat || cats[0] || '食料品その他',
-      enabledCats: form.enabledCats || cats,
+      defaultCat,
+      enabledCats: form.enabledCats || defaultEnabledCats,
     });
     saveSession({ ...session, boxId: id });
     setCurrentBox(id); setForm({});
@@ -199,11 +260,13 @@ export function useAppState() {
 
   const updateBox = async () => {
     if (!editingBox) return;
+    const icon = form.boxIcon || editingBox.icon;
+    const defaultEnabledCats = BOX_DEFAULT_CATS[icon] || cats;
     await update(ref(db, 'boxes/' + editingBox.id), {
       name: form.boxName || editingBox.name,
-      icon: form.boxIcon || editingBox.icon,
-      defaultCat: form.defaultCat || editingBox.defaultCat,
-      enabledCats: form.enabledCats || editingBox.enabledCats || cats,
+      icon,
+      defaultCat: form.defaultCat || editingBox.defaultCat || defaultEnabledCats[0],
+      enabledCats: form.enabledCats || editingBox.enabledCats || defaultEnabledCats,
     });
     setEditingBox(null); setForm({});
     showToast('ボックスを更新しました！', 'success'); setScreen('box');
@@ -363,6 +426,6 @@ export function useAppState() {
     handleBought, handleRegister, handleLogin, handleLogout, addFriend,
     createBox, updateBox, addItem, updateItem, deleteItem, openEditItem,
     handleEstimateExpiry, handleBarcode, handleReceipt, handleShortageBarcode,
-    confirmAndAddScanned,
+    confirmAndAddScanned, getItemEmoji,
   };
 }
