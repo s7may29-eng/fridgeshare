@@ -33,11 +33,27 @@ export const BOX_SVG = {
 export const BOX_ICON_KEYS = ['fridge','freezer','condiment','stock','alcohol','coffee','bath','laundry','electronics','medicine','gym','other'];
 export const BOX_LABELS = { fridge:'冷蔵庫', freezer:'冷凍庫', condiment:'調味料', stock:'ストック食材', alcohol:'お酒', coffee:'コーヒー・お茶', bath:'洗面・お風呂', laundry:'洗濯・掃除', electronics:'家電関連', medicine:'薬・衛生', gym:'ジム用品', other:'その他' };
 
+export const BOX_DEFAULT_CATS = {
+  fridge:      ['野菜・果物','肉・魚','乳製品','飲み物','調味料','冷凍食品'],
+  freezer:     ['肉・魚','冷凍食品','乳製品'],
+  condiment:   ['調味料','食料品その他'],
+  stock:       ['食料品その他','調味料','飲み物'],
+  alcohol:     ['飲み物','食料品その他'],
+  coffee:      ['飲み物','食料品その他'],
+  bath:        ['衛生用品','日用品'],
+  laundry:     ['洗剤・清掃','日用品'],
+  electronics: ['電池・電球','備品その他'],
+  medicine:    ['衛生用品','備品その他'],
+  gym:         ['備品その他','日用品'],
+  other:       ['食料品その他','日用品','備品その他'],
+};
+
 export const GUIDE_STEPS = [
-  { icon: '📦', title: '在庫ボックスを作ろう', desc: '冷蔵庫・棚・洗面台など、場所ごとにボックスを作って管理できます。' },
+  { icon: '📦', title: '在庫ボックスを作ろう', desc: '冷蔵庫・棚・洗面台など、場所ごとにボックスを作って管理できます。アイコンを選ぶと最適なカテゴリが自動で設定されます。' },
+  { icon: '🗂️', title: 'カテゴリは後から変更できます', desc: 'ボックスの✏️ボタンから、表示するカテゴリやデフォルトカテゴリをいつでも変更できます。' },
   { icon: '👨‍👩‍👧', title: '家族を招待しよう', desc: 'ホーム画面の招待ボタンから家族に共有。一度で全ボックスを共有できます。' },
   { icon: '📷', title: '3つの方法で追加', desc: 'バーコードスキャン・レシート読み取り・手動入力で簡単に在庫を登録できます。' },
-  { icon: '⏰', title: '期限を管理しよう', desc: '賞味期限が近づくと自動でお知らせ。食品ロスを減らせます。' },
+  { icon: '⏰', title: '期限を管理しよう', desc: '賞味期限が近づくと自動でお知らせ。品名を入力するとAIが期限を自動推定します。' },
 ];
 
 export const STYLES = {
