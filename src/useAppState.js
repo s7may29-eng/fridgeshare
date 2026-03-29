@@ -60,7 +60,7 @@ export function useAppState() {
     setGeminiKey(k);
     if (s?.userId) {
       setSession(s);
-      if (s.boxId) setCurrentBox(s.boxId);
+      setCurrentBox(null);
       onValue(ref(db, 'users/' + s.userId), snap => { if (snap.val()) setCurrentUser(snap.val()); });
       onValue(ref(db, 'users'), snap => { if (snap.val()) setUsers(snap.val()); });
       onValue(ref(db, 'boxes'), snap => { setBoxes(snap.val() || {}); });
@@ -68,8 +68,7 @@ export function useAppState() {
       onValue(ref(db, 'userCats/' + s.userId), snap => { setUserCats(snap.val() || null); });
       onValue(ref(db, 'shortageList/' + s.userId), snap => { setShortageList(snap.val() || {}); });
       onValue(ref(db, 'items'), snap => { setAllItems(snap.val() || {}); });
-      if (s.boxId) onValue(ref(db, 'items/' + s.boxId), snap => { setItems(snap.val() || {}); });
-      setScreen(s.boxId ? 'box' : 'home');
+      setScreen('home');
     } else setScreen('auth');
   }, []);
 
