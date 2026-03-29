@@ -36,6 +36,16 @@ const genId = () => crypto.getRandomValues(new Uint32Array(2)).reduce((a, b) => 
 const genCode = () => Array.from(crypto.getRandomValues(new Uint8Array(4))).map(b => b.toString(36).toUpperCase().padStart(2, '0')).join('-');
 const today = () => new Date().toISOString().split('T')[0];
 
+const LS_KEYS = ['hs-session', 'fs-session'];
+const lsGet = (k, fb) => {
+  const variants = [k, ...LS_KEYS.filter(x => x !== k)];
+  for (const key of variants) {
+    try { const v = localStorage.getItem(key); if (v !== null) return JSON.parse(v); } catch {}
+  }
+  return fb;
+};
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+
 async function lookupBarcode(barcode) {
   const res = await fetch('https://world.openfoodfacts.org/api/v0/product/' + barcode + '.json');
   if (!res.ok) throw new Error('network error');
@@ -69,7 +79,7 @@ async function analyzeReceipt(apiKey, base64Image, mimeType) {
 
 const GUIDE_STEPS = [
   { icon: '📦', title: '在庫ボックスを作ろう', desc: '冷蔵庫・棚・洗面台など、場所ごとにボックスを作って管理できます。' },
-  { icon: '👨‍👩‍👧', title: '家族を招待しよう', desc: '招待コードを共有するだけで、家族みんなでリアルタイムに在庫を共有できます。' },
+  { icon: '👨‍👩‍👧', title: '家族を招待しよう', desc: '設定画面の招待コードを家族に送るだけ。一度で全ボックスを共有できます。' },
   { icon: '📷', title: '3つの方法で追加', desc: 'バーコードスキャン・レシート読み取り・手動入力で簡単に在庫を登録できます。' },
   { icon: '⏰', title: '期限を管理しよう', desc: '賞味期限が近づくと自動でお知らせ。食品ロスを減らせます。' },
 ];
@@ -88,7 +98,6 @@ export default function App() {
   const [filterCat, setFilterCat] = useState('all');
   const [filterType, setFilterType] = useState('all');
   const [sortBy, setSortBy] = useState('name');
-  const [showInvite, setShowInvite] = useState(false);
   const [inviteInput, setInviteInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -99,38 +108,31 @@ export default function App() {
   const [pendingItems, setPendingItems] = useState([]);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [guideStep, setGuideStep] = useState(null);
+  const [friends, setFriends] = useState({});
   const receiptRef = useRef(null);
   const barcodeRef = useRef(null);
 
   const showToast = (msg, type = 'info') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3200); };
-  const lsGet = (k, fb) => { try { return JSON.parse(localStorage.getItem(k)) ?? fb; } catch { return fb; } };
-  const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+  const saveSession = (s) => { setSession(s); lsSet('hs-session', s); };
 
   useEffect(() => {
     const s = lsGet('hs-session', null);
-    const k = lsGet('hs-gemini', '');
+    const k = lsGet('hs-gemini', '') || lsGet('fs-gemini-key', '');
     setGeminiKey(k);
     if (s?.userId) {
       setSession(s);
       if (s.boxId) setCurrentBox(s.boxId);
-      const usersRef = ref(db, 'users');
-      const boxesRef = ref(db, 'boxes');
-      onValue(usersRef, snap => { if (snap.val()) setUsers(snap.val()); });
-      onValue(boxesRef, snap => { if (snap.val()) setBoxes(snap.val()); });
-      if (s.boxId) {
-        onValue(ref(db, 'items/' + s.boxId), snap => { setItems(snap.val() || {}); });
-      }
+      onValue(ref(db, 'users'), snap => { if (snap.val()) setUsers(snap.val()); });
+      onValue(ref(db, 'boxes'), snap => { setBoxes(snap.val() || {}); });
+      onValue(ref(db, 'friends/' + s.userId), snap => { setFriends(snap.val() || {}); });
+      if (s.boxId) onValue(ref(db, 'items/' + s.boxId), snap => { setItems(snap.val() || {}); });
       setScreen(s.boxId ? 'box' : 'home');
     } else setScreen('auth');
   }, []);
 
   useEffect(() => {
-    if (currentBox) {
-      onValue(ref(db, 'items/' + currentBox), snap => { setItems(snap.val() || {}); });
-    }
+    if (currentBox) onValue(ref(db, 'items/' + currentBox), snap => { setItems(snap.val() || {}); });
   }, [currentBox]);
-
-  const saveSession = (s) => { setSession(s); lsSet('hs-session', s); };
 
   const handleRegister = async () => {
     if (!form.name?.trim() || !form.email?.trim() || !form.password?.trim()) return showToast('全項目を入力してください', 'error');
@@ -143,12 +145,11 @@ export default function App() {
     }
     const id = genId();
     const hash = await hashPassword(form.password);
-    await set(ref(db, 'users/' + id), { id, name: form.name.trim(), email: form.email.toLowerCase(), hash, createdAt: Date.now() });
+    await set(ref(db, 'users/' + id), { id, name: form.name.trim(), email: form.email.toLowerCase(), hash, inviteCode: genCode(), createdAt: Date.now() });
     saveSession({ userId: id, boxId: null });
     setLoading(false); setForm({});
     showToast('ようこそ、' + form.name + 'さん！', 'success');
-    setGuideStep(0);
-    setScreen('guide');
+    setGuideStep(0); setScreen('guide');
   };
 
   const handleLogin = async () => {
@@ -160,10 +161,13 @@ export default function App() {
     if (!user) { setLoading(false); return showToast('メールまたはパスワードが違います', 'error'); }
     const hash = await hashPassword(form.password);
     if (hash !== user.hash) { setLoading(false); return showToast('メールまたはパスワードが違います', 'error'); }
+    if (!user.inviteCode) await update(ref(db, 'users/' + user.id), { inviteCode: genCode() });
     setUsers(allUsers);
     saveSession({ userId: user.id, boxId: null });
     const boxSnap = await get(ref(db, 'boxes'));
     if (boxSnap.val()) setBoxes(boxSnap.val());
+    const friendSnap = await get(ref(db, 'friends/' + user.id));
+    setFriends(friendSnap.val() || {});
     setLoading(false); setForm({});
     showToast('おかえりなさい、' + user.name + 'さん！', 'success');
     setScreen('home');
@@ -171,37 +175,29 @@ export default function App() {
 
   const handleLogout = () => { saveSession(null); setCurrentBox(null); setScreen('auth'); };
 
+  const addFriend = async () => {
+    const code = inviteInput.trim().toUpperCase();
+    if (!code) return showToast('招待コードを入力してください', 'error');
+    const snap = await get(ref(db, 'users'));
+    const allUsers = snap.val() || {};
+    const target = Object.values(allUsers).find(u => u.inviteCode === code);
+    if (!target) return showToast('招待コードが正しくありません', 'error');
+    if (target.id === session.userId) return showToast('自分のコードは使えません', 'error');
+    if (friends[target.id]) return showToast('既に追加済みです', 'error');
+    await update(ref(db, 'friends/' + session.userId), { [target.id]: true });
+    await update(ref(db, 'friends/' + target.id), { [session.userId]: true });
+    setFriends(prev => ({ ...prev, [target.id]: true }));
+    setInviteInput('');
+    showToast(target.name + 'さんと繋がりました！', 'success');
+  };
+
   const createBox = async () => {
     if (!form.boxName?.trim()) return showToast('名前を入力してください', 'error');
     const id = genId();
-    const box = { id, name: form.boxName.trim(), icon: form.boxIcon || 'fridge', ownerId: session.userId, members: { [session.userId]: true }, inviteCode: genCode(), createdAt: Date.now() };
-    await set(ref(db, 'boxes/' + id), box);
+    await set(ref(db, 'boxes/' + id), { id, name: form.boxName.trim(), icon: form.boxIcon || 'fridge', ownerId: session.userId, createdAt: Date.now() });
     saveSession({ ...session, boxId: id });
     setCurrentBox(id); setForm({});
     showToast('在庫ボックスを作成しました！', 'success'); setScreen('box');
-  };
-
-  const joinBox = async () => {
-    const code = inviteInput.trim().toUpperCase();
-    if (!code) return showToast('招待コードを入力してください', 'error');
-    const snap = await get(ref(db, 'boxes'));
-    const allBoxes = snap.val() || {};
-    const box = Object.values(allBoxes).find(b => b.inviteCode === code);
-    if (!box) return showToast('招待コードが正しくありません', 'error');
-    if (box.members?.[session.userId]) return showToast('既にメンバーです', 'error');
-    await update(ref(db, 'boxes/' + box.id + '/members'), { [session.userId]: true });
-    setBoxes({ ...allBoxes, [box.id]: { ...box, members: { ...box.members, [session.userId]: true } } });
-    saveSession({ ...session, boxId: box.id });
-    setCurrentBox(box.id); setInviteInput('');
-    showToast('「' + box.name + '」に参加しました！', 'success'); setScreen('box');
-  };
-
-  const refreshCode = async () => {
-    const box = boxes[currentBox];
-    if (!box || box.ownerId !== session.userId) return showToast('オーナーのみ変更できます', 'error');
-    const newCode = genCode();
-    await update(ref(db, 'boxes/' + box.id), { inviteCode: newCode });
-    showToast('招待コードを更新しました', 'success');
   };
 
   const addItem = async () => {
@@ -273,7 +269,8 @@ export default function App() {
   const box = currentBox ? boxes[currentBox] : null;
   const user = session ? users[session.userId] : null;
   const boxItems = Object.values(items);
-  const memberCount = box?.members ? Object.keys(box.members).length : 0;
+  const friendIds = Object.keys(friends);
+  const visibleBoxes = Object.values(boxes).filter(b => b.ownerId === session?.userId || friendIds.includes(b.ownerId));
   const filteredItems = boxItems
     .filter(i => filterCat === 'all' || i.category === filterCat)
     .filter(i => filterType === 'all' || (filterType === 'food' ? FOOD_CATS.includes(i.category) : SUPPLY_CATS.includes(i.category)))
@@ -334,9 +331,7 @@ export default function App() {
       <style>{CSS}</style>
       <div style={{...S.wrap, display:'flex', flexDirection:'column', justifyContent:'center', paddingTop:40, paddingBottom:40}}>
         <div style={{...S.card, textAlign:'center', animation:'scaleIn 0.3s ease', padding:'40px 28px'}}>
-          <div style={{fontSize:12, fontWeight:600, color:textMuted, letterSpacing:'0.1em', marginBottom:24}}>
-            {guideStep + 1} / {GUIDE_STEPS.length}
-          </div>
+          <div style={{fontSize:12, fontWeight:600, color:textMuted, letterSpacing:'0.1em', marginBottom:24}}>{guideStep + 1} / {GUIDE_STEPS.length}</div>
           <div style={{fontSize:64, marginBottom:20}}>{GUIDE_STEPS[guideStep].icon}</div>
           <div style={{fontWeight:700, fontSize:20, marginBottom:12, letterSpacing:'-0.02em'}}>{GUIDE_STEPS[guideStep].title}</div>
           <div style={{color:textMuted, fontSize:14, lineHeight:1.6, marginBottom:32}}>{GUIDE_STEPS[guideStep].desc}</div>
@@ -345,11 +340,10 @@ export default function App() {
               <div key={i} style={{width:i===guideStep?20:6, height:6, borderRadius:3, background:i===guideStep?accent:border, transition:'all 0.3s'}} />
             ))}
           </div>
-          {guideStep < GUIDE_STEPS.length - 1 ? (
-            <button className='pressable' style={S.btn()} onClick={()=>setGuideStep(guideStep+1)}>次へ →</button>
-          ) : (
-            <button className='pressable' style={S.btn()} onClick={()=>setScreen('home')}>はじめる！</button>
-          )}
+          {guideStep < GUIDE_STEPS.length - 1
+            ? <button className='pressable' style={S.btn()} onClick={()=>setGuideStep(guideStep+1)}>次へ →</button>
+            : <button className='pressable' style={S.btn()} onClick={()=>setScreen('home')}>はじめる！</button>
+          }
           {guideStep > 0 && <button className='pressable' style={S.btnGhost} onClick={()=>setGuideStep(guideStep-1)}>← 戻る</button>}
           <button onClick={()=>setScreen('home')} style={{background:'none', border:'none', color:textMuted, fontSize:13, cursor:'pointer', marginTop:12, fontFamily:'inherit'}}>スキップ</button>
         </div>
@@ -395,7 +389,34 @@ export default function App() {
         <div style={S.hdr}>
           <button onClick={()=>setScreen(currentBox?'box':'home')} style={S.iconBtn}>← 戻る</button>
           <span style={{fontWeight:700, fontSize:16}}>設定</span>
-          <div style={{width:72}} />
+          <div style={{width:60}} />
+        </div>
+        <div style={{...S.card, marginBottom:12}}>
+          <div style={{fontWeight:700, marginBottom:4, fontSize:15}}>あなたの招待コード</div>
+          <p style={{color:textMuted, fontSize:13, marginTop:4, marginBottom:12, lineHeight:1.5}}>このコードを家族に共有すると、お互いの全ボックスが見えるようになります。</p>
+          <div style={{background:'#f5f5f3', borderRadius:12, padding:'14px', fontFamily:'monospace', fontSize:22, fontWeight:700, color:accent, textAlign:'center', letterSpacing:4}}>
+            {user?.inviteCode || '----'}
+          </div>
+        </div>
+        <div style={{...S.card, marginBottom:12}}>
+          <div style={{fontWeight:700, marginBottom:4, fontSize:15}}>家族を追加</div>
+          <p style={{color:textMuted, fontSize:13, marginTop:4, marginBottom:12, lineHeight:1.5}}>家族の招待コードを入力するとお互いのボックスを共有できます。</p>
+          {Object.keys(friends).length > 0 && (
+            <div style={{marginBottom:12}}>
+              {Object.keys(friends).map(fid => {
+                const f = users[fid];
+                return f ? (
+                  <div key={fid} style={{display:'flex', alignItems:'center', gap:10, padding:'8px 0', borderBottom:'1px solid ' + border}}>
+                    <div style={{width:32, height:32, borderRadius:'50%', background:accentLight, display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, fontWeight:700, color:accent}}>{f.name?.[0]}</div>
+                    <span style={{fontSize:14, fontWeight:500}}>{f.name}</span>
+                  </div>
+                ) : null;
+              })}
+            </div>
+          )}
+          <label style={S.label}>招待コードを入力</label>
+          <input style={S.input} placeholder='XX-XX-XX-XX' value={inviteInput} onChange={e=>setInviteInput(e.target.value)} />
+          <button className='pressable' style={S.btn()} onClick={addFriend}>追加する</button>
         </div>
         <div style={{...S.card, marginBottom:12}}>
           <div style={{fontWeight:700, marginBottom:4, fontSize:15}}>Gemini APIキー</div>
@@ -425,18 +446,14 @@ export default function App() {
           </div>
           <button onClick={()=>setScreen('settings')} style={S.iconBtn}>⚙️</button>
         </div>
-
-        {Object.values(boxes).filter(b=>b.members?.[session.userId]).length > 0 && (
+        {visibleBoxes.length > 0 && (
           <div style={{marginBottom:24}}>
             <div style={{fontSize:11, fontWeight:600, color:textMuted, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:10}}>在庫ボックス</div>
-            {Object.values(boxes).filter(b=>b.members?.[session.userId]).map(b => {
-              const count = Object.values(items).filter(i=>i.boxId===b.id).length;
+            {visibleBoxes.map(b => {
+              const owner = users[b.ownerId];
+              const isOwn = b.ownerId === session.userId;
               return (
-                <div key={b.id} className='pressable' onClick={async ()=>{
-                  saveSession({...session, boxId:b.id});
-                  setCurrentBox(b.id);
-                  setScreen('box');
-                }}
+                <div key={b.id} className='pressable' onClick={()=>{saveSession({...session,boxId:b.id});setCurrentBox(b.id);setScreen('box');}}
                   style={{...S.card, marginBottom:8, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'space-between'}}>
                   <div style={{display:'flex', alignItems:'center', gap:14}}>
                     <div style={{background:'#f5f5f3', borderRadius:14, width:52, height:52, display:'flex', alignItems:'center', justifyContent:'center'}}>
@@ -444,7 +461,7 @@ export default function App() {
                     </div>
                     <div>
                       <div style={{fontWeight:600, fontSize:15}}>{b.name}</div>
-                      <div style={{color:textMuted, fontSize:12, marginTop:2}}>{Object.keys(b.members||{}).length}人 · {count}品</div>
+                      <div style={{color:textMuted, fontSize:12, marginTop:2}}>{isOwn?'自分のボックス':owner?.name+'さんのボックス'}</div>
                     </div>
                   </div>
                   <span style={{color:border, fontSize:20}}>›</span>
@@ -453,7 +470,6 @@ export default function App() {
             })}
           </div>
         )}
-
         <div style={{...S.card, marginBottom:10, border:'1.5px dashed ' + border}}>
           <div style={{fontWeight:700, marginBottom:16, fontSize:15}}>新しい在庫ボックスを作る</div>
           <label style={S.label}>アイコンを選ぼう</label>
@@ -468,12 +484,6 @@ export default function App() {
           <label style={S.label}>ボックス名</label>
           <input style={S.input} placeholder='例：キッチン・洗面台' value={form.boxName||''} onChange={e=>setForm(p=>({...p,boxName:e.target.value}))} />
           <button className='pressable' style={S.btn()} onClick={createBox}>作成する</button>
-        </div>
-
-        <div style={{...S.card, border:'1.5px dashed ' + border}}>
-          <div style={{fontWeight:700, marginBottom:12, fontSize:15}}>招待コードで参加</div>
-          <input style={S.input} placeholder='XX-XX-XX-XX' value={inviteInput} onChange={e=>setInviteInput(e.target.value)} />
-          <button className='pressable' style={S.btn('#374151')} onClick={joinBox}>参加する</button>
         </div>
         <div style={{height:40}} />
       </div>
@@ -492,24 +502,12 @@ export default function App() {
               <button onClick={()=>setScreen('home')} style={{background:'none',border:'none',color:textMuted,cursor:'pointer',fontSize:13,padding:0,fontFamily:'inherit',fontWeight:500}}>← 戻る</button>
               <div style={{display:'flex', alignItems:'center', gap:8, marginTop:2}}>
                 <BoxIcon k={box?.icon} size={24} />
-                <span style={{fontWeight:700, fontSize:17, letterSpacing:'-0.02em'}}>{box?.name}</span>
+                <span style={{fontWeight:700, fontSize:17}}>{box?.name}</span>
               </div>
-              <div style={{color:textMuted, fontSize:12, marginTop:1}}>{memberCount}人 · {boxItems.length}品</div>
+              <div style={{color:textMuted, fontSize:12, marginTop:1}}>{boxItems.length}品</div>
             </div>
-            <div style={{display:'flex', gap:6}}>
-              <button onClick={()=>setShowInvite(!showInvite)} style={S.iconBtn}>🔗</button>
-              <button onClick={()=>setScreen('settings')} style={S.iconBtn}>⚙️</button>
-            </div>
+            <button onClick={()=>setScreen('settings')} style={S.iconBtn}>⚙️</button>
           </div>
-
-          {showInvite && (
-            <div style={{...S.card, marginBottom:14, animation:'fadeUp 0.2s ease'}}>
-              <div style={{fontSize:11, fontWeight:600, color:textMuted, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:8}}>招待コード</div>
-              <div style={{background:'#f5f5f3', borderRadius:12, padding:'14px', fontFamily:'monospace', fontSize:20, fontWeight:700, color:accent, textAlign:'center', letterSpacing:4}}>{box?.inviteCode}</div>
-              <div style={{color:textMuted, fontSize:12, marginTop:8, textAlign:'center'}}>このコードを家族に共有してください</div>
-              {box?.ownerId===session.userId && <button className='pressable' style={S.btnGhost} onClick={refreshCode}>コードを再発行</button>}
-            </div>
-          )}
 
           {expiredItems.length > 0 && <div style={{background:'#fef2f2', border:'1px solid #fecaca', borderRadius:12, padding:'10px 14px', marginBottom:10, fontSize:13, fontWeight:600, color:danger}}>⚠ 期限切れ {expiredItems.length}品</div>}
           {expiringItems.length > 0 && <div style={{background:'#fffbeb', border:'1px solid #fde68a', borderRadius:12, padding:'10px 14px', marginBottom:10, fontSize:13, fontWeight:600, color:'#d97706'}}>⏳ もうすぐ期限 {expiringItems.length}品（3日以内）</div>}
