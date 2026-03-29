@@ -1,19 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-
-const KEYS = {
-  USERS: 'fs-users', BOXES: 'fs-boxes', ITEMS: 'fs-items',
-  SESSION: 'fs-session', APIKEY: 'fs-gemini-key',
-};
-const load = (key, fb) => { try { return JSON.parse(localStorage.getItem(key)) ?? fb; } catch { return fb; } };
-const save = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
-
-async function hashPassword(pw) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pw + 'inv-salt-v1'));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-const genId = () => crypto.getRandomValues(new Uint32Array(2)).reduce((a, b) => a + b.toString(36), '');
-const genCode = () => Array.from(crypto.getRandomValues(new Uint8Array(4))).map(b => b.toString(36).toUpperCase().padStart(2, '0')).join('-');
-const today = () => new Date().toISOString().split('T')[0];
+import { db } from './firebase';
+import { ref, set, get, onValue, update, remove } from 'firebase/database';
 
 const FOOD_CATS = ['野菜・果物','肉・魚','乳製品','飲み物','調味料','冷凍食品','食料品その他'];
 const SUPPLY_CATS = ['日用品','洗剤・清掃','衛生用品','文房具','電池・電球','備品その他'];
@@ -40,6 +27,14 @@ const BOX_SVG = {
 };
 const BOX_ICON_KEYS = ['fridge','home','cart','shelf','bath','medicine','condiment','stationery','laundry'];
 const BOX_LABELS = { fridge:'冷蔵庫', home:'家全体', cart:'買い置き', shelf:'棚・パントリー', bath:'洗面・お風呂', medicine:'薬・衛生', condiment:'調味料', stationery:'文具・雑貨', laundry:'洗濯・掃除' };
+
+async function hashPassword(pw) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pw + 'hs-salt-v1'));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+const genId = () => crypto.getRandomValues(new Uint32Array(2)).reduce((a, b) => a + b.toString(36), '');
+const genCode = () => Array.from(crypto.getRandomValues(new Uint8Array(4))).map(b => b.toString(36).toUpperCase().padStart(2, '0')).join('-');
+const today = () => new Date().toISOString().split('T')[0];
 
 async function lookupBarcode(barcode) {
   const res = await fetch('https://world.openfoodfacts.org/api/v0/product/' + barcode + '.json');
@@ -72,6 +67,13 @@ async function analyzeReceipt(apiKey, base64Image, mimeType) {
   return JSON.parse(text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
 }
 
+const GUIDE_STEPS = [
+  { icon: '📦', title: '在庫ボックスを作ろう', desc: '冷蔵庫・棚・洗面台など、場所ごとにボックスを作って管理できます。' },
+  { icon: '👨‍👩‍👧', title: '家族を招待しよう', desc: '招待コードを共有するだけで、家族みんなでリアルタイムに在庫を共有できます。' },
+  { icon: '📷', title: '3つの方法で追加', desc: 'バーコードスキャン・レシート読み取り・手動入力で簡単に在庫を登録できます。' },
+  { icon: '⏰', title: '期限を管理しよう', desc: '賞味期限が近づくと自動でお知らせ。食品ロスを減らせます。' },
+];
+
 export default function App() {
   const [screen, setScreen] = useState('loading');
   const [users, setUsers] = useState({});
@@ -96,98 +98,129 @@ export default function App() {
   const [scannedItems, setScannedItems] = useState([]);
   const [pendingItems, setPendingItems] = useState([]);
   const [showAddMenu, setShowAddMenu] = useState(false);
+  const [guideStep, setGuideStep] = useState(null);
   const receiptRef = useRef(null);
   const barcodeRef = useRef(null);
 
   const showToast = (msg, type = 'info') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3200); };
+  const lsGet = (k, fb) => { try { return JSON.parse(localStorage.getItem(k)) ?? fb; } catch { return fb; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
   useEffect(() => {
-    const u = load(KEYS.USERS, {}); const b = load(KEYS.BOXES, {}); const it = load(KEYS.ITEMS, {});
-    const s = load(KEYS.SESSION, null); const k = load(KEYS.APIKEY, '');
-    setUsers(u); setBoxes(b); setItems(it); setGeminiKey(k);
-    if (s && u[s.userId]) {
+    const s = lsGet('hs-session', null);
+    const k = lsGet('hs-gemini', '');
+    setGeminiKey(k);
+    if (s?.userId) {
       setSession(s);
-      if (s.boxId && b[s.boxId]) { setCurrentBox(s.boxId); setScreen('box'); }
-      else setScreen('home');
+      if (s.boxId) setCurrentBox(s.boxId);
+      const usersRef = ref(db, 'users');
+      const boxesRef = ref(db, 'boxes');
+      onValue(usersRef, snap => { if (snap.val()) setUsers(snap.val()); });
+      onValue(boxesRef, snap => { if (snap.val()) setBoxes(snap.val()); });
+      if (s.boxId) {
+        onValue(ref(db, 'items/' + s.boxId), snap => { setItems(snap.val() || {}); });
+      }
+      setScreen(s.boxId ? 'box' : 'home');
     } else setScreen('auth');
   }, []);
 
-  const persist = (u, b, it) => {
-    if (u) { setUsers(u); save(KEYS.USERS, u); }
-    if (b) { setBoxes(b); save(KEYS.BOXES, b); }
-    if (it) { setItems(it); save(KEYS.ITEMS, it); }
-  };
+  useEffect(() => {
+    if (currentBox) {
+      onValue(ref(db, 'items/' + currentBox), snap => { setItems(snap.val() || {}); });
+    }
+  }, [currentBox]);
+
+  const saveSession = (s) => { setSession(s); lsSet('hs-session', s); };
 
   const handleRegister = async () => {
     if (!form.name?.trim() || !form.email?.trim() || !form.password?.trim()) return showToast('全項目を入力してください', 'error');
     if (form.password.length < 6) return showToast('パスワードは6文字以上', 'error');
-    if (Object.values(users).find(u => u.email === form.email.toLowerCase())) return showToast('このメールは登録済みです', 'error');
     setLoading(true);
-    const id = genId(); const hash = await hashPassword(form.password);
-    const nu = { ...users, [id]: { id, name: form.name.trim(), email: form.email.toLowerCase(), hash, createdAt: Date.now() } };
-    persist(nu, null, null);
-    const s = { userId: id, boxId: null }; setSession(s); save(KEYS.SESSION, s);
+    const snap = await get(ref(db, 'users'));
+    const allUsers = snap.val() || {};
+    if (Object.values(allUsers).find(u => u.email === form.email.toLowerCase())) {
+      setLoading(false); return showToast('このメールは登録済みです', 'error');
+    }
+    const id = genId();
+    const hash = await hashPassword(form.password);
+    await set(ref(db, 'users/' + id), { id, name: form.name.trim(), email: form.email.toLowerCase(), hash, createdAt: Date.now() });
+    saveSession({ userId: id, boxId: null });
     setLoading(false); setForm({});
-    showToast('Welcome, ' + form.name + '!', 'success'); setScreen('home');
+    showToast('ようこそ、' + form.name + 'さん！', 'success');
+    setGuideStep(0);
+    setScreen('guide');
   };
 
   const handleLogin = async () => {
     if (!form.email?.trim() || !form.password?.trim()) return showToast('メールとパスワードを入力してください', 'error');
-    const user = Object.values(users).find(u => u.email === form.email.toLowerCase());
-    if (!user) return showToast('メールまたはパスワードが違います', 'error');
     setLoading(true);
+    const snap = await get(ref(db, 'users'));
+    const allUsers = snap.val() || {};
+    const user = Object.values(allUsers).find(u => u.email === form.email.toLowerCase());
+    if (!user) { setLoading(false); return showToast('メールまたはパスワードが違います', 'error'); }
     const hash = await hashPassword(form.password);
     if (hash !== user.hash) { setLoading(false); return showToast('メールまたはパスワードが違います', 'error'); }
-    const s = { userId: user.id, boxId: null }; setSession(s); save(KEYS.SESSION, s);
+    setUsers(allUsers);
+    saveSession({ userId: user.id, boxId: null });
+    const boxSnap = await get(ref(db, 'boxes'));
+    if (boxSnap.val()) setBoxes(boxSnap.val());
     setLoading(false); setForm({});
-    showToast('Welcome back, ' + user.name + '!', 'success'); setScreen('home');
+    showToast('おかえりなさい、' + user.name + 'さん！', 'success');
+    setScreen('home');
   };
 
-  const handleLogout = () => { setSession(null); setCurrentBox(null); save(KEYS.SESSION, null); setScreen('auth'); };
+  const handleLogout = () => { saveSession(null); setCurrentBox(null); setScreen('auth'); };
 
-  const createBox = () => {
+  const createBox = async () => {
     if (!form.boxName?.trim()) return showToast('名前を入力してください', 'error');
     const id = genId();
-    const nb = { ...boxes, [id]: { id, name: form.boxName.trim(), icon: form.boxIcon || 'fridge', ownerId: session.userId, members: [session.userId], inviteCode: genCode(), createdAt: Date.now() } };
-    persist(null, nb, null);
-    const s = { ...session, boxId: id }; setSession(s); save(KEYS.SESSION, s);
+    const box = { id, name: form.boxName.trim(), icon: form.boxIcon || 'fridge', ownerId: session.userId, members: { [session.userId]: true }, inviteCode: genCode(), createdAt: Date.now() };
+    await set(ref(db, 'boxes/' + id), box);
+    saveSession({ ...session, boxId: id });
     setCurrentBox(id); setForm({});
-    showToast('Box created!', 'success'); setScreen('box');
+    showToast('在庫ボックスを作成しました！', 'success'); setScreen('box');
   };
 
-  const joinBox = () => {
+  const joinBox = async () => {
     const code = inviteInput.trim().toUpperCase();
     if (!code) return showToast('招待コードを入力してください', 'error');
-    const box = Object.values(boxes).find(b => b.inviteCode === code);
+    const snap = await get(ref(db, 'boxes'));
+    const allBoxes = snap.val() || {};
+    const box = Object.values(allBoxes).find(b => b.inviteCode === code);
     if (!box) return showToast('招待コードが正しくありません', 'error');
-    if (box.members.includes(session.userId)) return showToast('既にメンバーです', 'error');
-    persist(null, { ...boxes, [box.id]: { ...box, members: [...box.members, session.userId] } }, null);
-    const s = { ...session, boxId: box.id }; setSession(s); save(KEYS.SESSION, s);
+    if (box.members?.[session.userId]) return showToast('既にメンバーです', 'error');
+    await update(ref(db, 'boxes/' + box.id + '/members'), { [session.userId]: true });
+    setBoxes({ ...allBoxes, [box.id]: { ...box, members: { ...box.members, [session.userId]: true } } });
+    saveSession({ ...session, boxId: box.id });
     setCurrentBox(box.id); setInviteInput('');
-    showToast('Joined ' + box.name + '!', 'success'); setScreen('box');
+    showToast('「' + box.name + '」に参加しました！', 'success'); setScreen('box');
   };
 
-  const refreshCode = () => {
+  const refreshCode = async () => {
     const box = boxes[currentBox];
     if (!box || box.ownerId !== session.userId) return showToast('オーナーのみ変更できます', 'error');
-    persist(null, { ...boxes, [box.id]: { ...box, inviteCode: genCode() } }, null);
-    showToast('Code refreshed!', 'success');
+    const newCode = genCode();
+    await update(ref(db, 'boxes/' + box.id), { inviteCode: newCode });
+    showToast('招待コードを更新しました', 'success');
   };
 
-  const addItem = () => {
+  const addItem = async () => {
     if (!form.itemName?.trim()) return showToast('品名を入力してください', 'error');
     const id = genId();
-    persist(null, null, { ...items, [id]: { id, boxId: currentBox, name: form.itemName.trim(), category: form.category || '食料品その他', quantity: form.quantity || '1', unit: form.unit || '', expiry: form.expiry || '', purchaseDate: form.purchaseDate || '', note: form.note || '', addedBy: session.userId, addedAt: Date.now(), updatedAt: Date.now() } });
-    setForm({}); showToast('Added!', 'success'); setScreen('box');
+    await set(ref(db, 'items/' + currentBox + '/' + id), { id, boxId: currentBox, name: form.itemName.trim(), category: form.category || '食料品その他', quantity: form.quantity || '1', unit: form.unit || '', expiry: form.expiry || '', purchaseDate: form.purchaseDate || '', note: form.note || '', addedBy: session.userId, addedAt: Date.now(), updatedAt: Date.now() });
+    setForm({}); showToast('追加しました！', 'success'); setScreen('box');
   };
 
-  const updateItem = () => {
+  const updateItem = async () => {
     if (!form.itemName?.trim()) return showToast('品名を入力してください', 'error');
-    persist(null, null, { ...items, [editingItem.id]: { ...items[editingItem.id], name: form.itemName.trim(), category: form.category || '食料品その他', quantity: form.quantity || '1', unit: form.unit || '', expiry: form.expiry || '', purchaseDate: form.purchaseDate || '', note: form.note || '', updatedAt: Date.now() } });
-    setEditingItem(null); setForm({}); showToast('Updated!', 'success'); setScreen('box');
+    await update(ref(db, 'items/' + currentBox + '/' + editingItem.id), { name: form.itemName.trim(), category: form.category || '食料品その他', quantity: form.quantity || '1', unit: form.unit || '', expiry: form.expiry || '', purchaseDate: form.purchaseDate || '', note: form.note || '', updatedAt: Date.now() });
+    setEditingItem(null); setForm({}); showToast('更新しました！', 'success'); setScreen('box');
   };
 
-  const deleteItem = (id) => { const ni = { ...items }; delete ni[id]; persist(null, null, ni); setConfirmDelete(null); showToast('Deleted', 'info'); };
+  const deleteItem = async (id) => {
+    await remove(ref(db, 'items/' + currentBox + '/' + id));
+    setConfirmDelete(null); showToast('削除しました', 'info');
+  };
 
   const openEditItem = (item) => {
     setEditingItem(item);
@@ -207,7 +240,7 @@ export default function App() {
         setScanning(false);
         if (!product) { showToast('DBに商品が見つかりませんでした', 'error'); setForm({ purchaseDate: today() }); setScreen('addItem'); return; }
         setForm({ itemName: product.name, category: product.category, quantity: product.quantity, unit: product.unit, purchaseDate: today() });
-        setScreen('addItem'); showToast('商品情報を取得しました!', 'success');
+        setScreen('addItem'); showToast('商品情報を取得しました！', 'success');
       } else { setScanning(false); showToast('このブラウザはバーコード非対応です', 'error'); setForm({ purchaseDate: today() }); setScreen('addItem'); }
     } catch { setScanning(false); showToast('読み取りに失敗しました', 'error'); }
   };
@@ -225,11 +258,13 @@ export default function App() {
     } catch { showToast('読み取りに失敗しました', 'error'); setScanning(false); }
   };
 
-  const confirmAndAddScanned = () => {
-    const now = Date.now(); const newItems = { ...items };
-    scannedItems.forEach(item => { const id = genId(); newItems[id] = { id, boxId: currentBox, name: item.name, category: item.category || '食料品その他', quantity: item.quantity || '1', unit: item.unit || '', expiry: '', purchaseDate: item.purchaseDate || today(), note: '', addedBy: session.userId, addedAt: now, updatedAt: now }; });
-    persist(null, null, newItems);
-    showToast(scannedItems.length + ' items added!', 'success'); setScannedItems([]); setScreen('box');
+  const confirmAndAddScanned = async () => {
+    const now = Date.now();
+    for (const item of scannedItems) {
+      const id = genId();
+      await set(ref(db, 'items/' + currentBox + '/' + id), { id, boxId: currentBox, name: item.name, category: item.category || '食料品その他', quantity: item.quantity || '1', unit: item.unit || '', expiry: '', purchaseDate: item.purchaseDate || today(), note: '', addedBy: session.userId, addedAt: now, updatedAt: now });
+    }
+    showToast(scannedItems.length + '品を追加しました！', 'success'); setScannedItems([]); setScreen('box');
   };
 
   const isExpiringSoon = (e) => { if (!e) return false; const d = (new Date(e) - new Date()) / 86400000; return d >= 0 && d <= 3; };
@@ -237,7 +272,8 @@ export default function App() {
 
   const box = currentBox ? boxes[currentBox] : null;
   const user = session ? users[session.userId] : null;
-  const boxItems = currentBox ? Object.values(items).filter(i => i.boxId === currentBox) : [];
+  const boxItems = Object.values(items);
+  const memberCount = box?.members ? Object.keys(box.members).length : 0;
   const filteredItems = boxItems
     .filter(i => filterCat === 'all' || i.category === filterCat)
     .filter(i => filterType === 'all' || (filterType === 'food' ? FOOD_CATS.includes(i.category) : SUPPLY_CATS.includes(i.category)))
@@ -288,7 +324,35 @@ export default function App() {
       <div style={{textAlign:'center'}}>
         <BoxIcon k='fridge' size={56} />
         <div style={{fontWeight:700, fontSize:20, marginTop:12, letterSpacing:'-0.03em'}}>HomeStock</div>
-        <div style={{color:textMuted, marginTop:4, fontSize:13}}>Loading...</div>
+        <div style={{color:textMuted, marginTop:4, fontSize:13}}>読み込み中...</div>
+      </div>
+    </div>
+  );
+
+  if (screen === 'guide') return (
+    <div style={{...S.app, display:'flex', alignItems:'center', justifyContent:'center'}}>
+      <style>{CSS}</style>
+      <div style={{...S.wrap, display:'flex', flexDirection:'column', justifyContent:'center', paddingTop:40, paddingBottom:40}}>
+        <div style={{...S.card, textAlign:'center', animation:'scaleIn 0.3s ease', padding:'40px 28px'}}>
+          <div style={{fontSize:12, fontWeight:600, color:textMuted, letterSpacing:'0.1em', marginBottom:24}}>
+            {guideStep + 1} / {GUIDE_STEPS.length}
+          </div>
+          <div style={{fontSize:64, marginBottom:20}}>{GUIDE_STEPS[guideStep].icon}</div>
+          <div style={{fontWeight:700, fontSize:20, marginBottom:12, letterSpacing:'-0.02em'}}>{GUIDE_STEPS[guideStep].title}</div>
+          <div style={{color:textMuted, fontSize:14, lineHeight:1.6, marginBottom:32}}>{GUIDE_STEPS[guideStep].desc}</div>
+          <div style={{display:'flex', gap:6, justifyContent:'center', marginBottom:28}}>
+            {GUIDE_STEPS.map((_, i) => (
+              <div key={i} style={{width:i===guideStep?20:6, height:6, borderRadius:3, background:i===guideStep?accent:border, transition:'all 0.3s'}} />
+            ))}
+          </div>
+          {guideStep < GUIDE_STEPS.length - 1 ? (
+            <button className='pressable' style={S.btn()} onClick={()=>setGuideStep(guideStep+1)}>次へ →</button>
+          ) : (
+            <button className='pressable' style={S.btn()} onClick={()=>setScreen('home')}>はじめる！</button>
+          )}
+          {guideStep > 0 && <button className='pressable' style={S.btnGhost} onClick={()=>setGuideStep(guideStep-1)}>← 戻る</button>}
+          <button onClick={()=>setScreen('home')} style={{background:'none', border:'none', color:textMuted, fontSize:13, cursor:'pointer', marginTop:12, fontFamily:'inherit'}}>スキップ</button>
+        </div>
       </div>
     </div>
   );
@@ -307,16 +371,16 @@ export default function App() {
           {['login','register'].map(m => (
             <button key={m} onClick={() => {setAuthMode(m);setForm({});}}
               style={{flex:1, padding:'10px', borderRadius:11, border:'none', cursor:'pointer', fontWeight:600, fontSize:14, fontFamily:'inherit', transition:'all 0.18s', background:authMode===m?cardBg:'transparent', color:authMode===m?text:textMuted, boxShadow:authMode===m?'0 1px 4px rgba(0,0,0,0.1)':'none'}}>
-              {m==='login'?'Log in':'Sign up'}
+              {m==='login'?'ログイン':'新規登録'}
             </button>
           ))}
         </div>
         <div style={{...S.card, animation:'scaleIn 0.25s ease'}}>
-          {authMode==='register' && <div style={{marginBottom:14}}><label style={S.label}>Name</label><input style={S.input} placeholder='Your name' value={form.name||''} onChange={e=>setForm(p=>({...p,name:e.target.value}))} /></div>}
-          <div style={{marginBottom:14}}><label style={S.label}>Email</label><input style={S.input} type='email' placeholder='you@example.com' value={form.email||''} onChange={e=>setForm(p=>({...p,email:e.target.value}))} /></div>
-          <div style={{marginBottom:4}}><label style={S.label}>Password</label><input style={S.input} type='password' placeholder='6+ characters' value={form.password||''} onChange={e=>setForm(p=>({...p,password:e.target.value}))} /></div>
+          {authMode==='register' && <div style={{marginBottom:14}}><label style={S.label}>ニックネーム</label><input style={S.input} placeholder='例：田中 花子' value={form.name||''} onChange={e=>setForm(p=>({...p,name:e.target.value}))} /></div>}
+          <div style={{marginBottom:14}}><label style={S.label}>メールアドレス</label><input style={S.input} type='email' placeholder='you@example.com' value={form.email||''} onChange={e=>setForm(p=>({...p,email:e.target.value}))} /></div>
+          <div style={{marginBottom:4}}><label style={S.label}>パスワード</label><input style={S.input} type='password' placeholder='6文字以上' value={form.password||''} onChange={e=>setForm(p=>({...p,password:e.target.value}))} /></div>
           <button className='pressable' style={S.btn()} onClick={authMode==='login'?handleLogin:handleRegister} disabled={loading}>
-            {loading?'...' : authMode==='login'?'Log in':'Create account'}
+            {loading?'処理中...' : authMode==='login'?'ログイン':'アカウント作成'}
           </button>
         </div>
         <div style={{height:40}} />
@@ -329,21 +393,21 @@ export default function App() {
     <div style={S.app}><style>{CSS}</style>
       <div style={S.wrap}>
         <div style={S.hdr}>
-          <button onClick={()=>setScreen(currentBox?'box':'home')} style={S.iconBtn}>← Back</button>
-          <span style={{fontWeight:700, fontSize:16}}>Settings</span>
+          <button onClick={()=>setScreen(currentBox?'box':'home')} style={S.iconBtn}>← 戻る</button>
+          <span style={{fontWeight:700, fontSize:16}}>設定</span>
           <div style={{width:72}} />
         </div>
         <div style={{...S.card, marginBottom:12}}>
-          <div style={{fontWeight:700, marginBottom:4, fontSize:15}}>Gemini API Key</div>
+          <div style={{fontWeight:700, marginBottom:4, fontSize:15}}>Gemini APIキー</div>
           <p style={{color:textMuted, fontSize:13, marginBottom:14, marginTop:4, lineHeight:1.5}}>レシート読み取りに使用。バーコードには不要。<br/>aistudio.google.comで無料取得できます。</p>
-          <label style={S.label}>API Key</label>
+          <label style={S.label}>APIキー</label>
           <input style={S.input} type='password' placeholder='AIza...' value={geminiKey} onChange={e=>setGeminiKey(e.target.value)} />
-          <button className='pressable' style={S.btn()} onClick={()=>{save(KEYS.APIKEY,geminiKey);showToast('Saved!','success');}}>Save</button>
+          <button className='pressable' style={S.btn()} onClick={()=>{lsSet('hs-gemini',geminiKey);showToast('保存しました！','success');}}>保存する</button>
         </div>
         <div style={S.card}>
-          <div style={{fontWeight:700, marginBottom:4, fontSize:15}}>Account</div>
+          <div style={{fontWeight:700, marginBottom:4, fontSize:15}}>アカウント</div>
           <div style={{color:textMuted, fontSize:14, margin:'8px 0 16px'}}>{user?.name} · {user?.email}</div>
-          <button className='pressable' style={S.btnGhost} onClick={handleLogout}>Log out</button>
+          <button className='pressable' style={S.btnGhost} onClick={handleLogout}>ログアウト</button>
         </div>
         <div style={{height:40}} />
       </div>
@@ -356,27 +420,31 @@ export default function App() {
       <div style={S.wrap}>
         <div style={S.hdr}>
           <div>
-            <div style={{fontSize:13, color:textMuted, fontWeight:500}}>Good day,</div>
-            <div style={{fontSize:20, fontWeight:700, letterSpacing:'-0.02em', marginTop:1}}>{user?.name}</div>
+            <div style={{fontSize:13, color:textMuted, fontWeight:500}}>こんにちは</div>
+            <div style={{fontSize:20, fontWeight:700, letterSpacing:'-0.02em', marginTop:1}}>{user?.name}さん</div>
           </div>
           <button onClick={()=>setScreen('settings')} style={S.iconBtn}>⚙️</button>
         </div>
-        {Object.values(boxes).filter(b=>b.members.includes(session.userId)).length > 0 && (
+
+        {Object.values(boxes).filter(b=>b.members?.[session.userId]).length > 0 && (
           <div style={{marginBottom:24}}>
-            <div style={{fontSize:11, fontWeight:600, color:textMuted, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:10}}>My Boxes</div>
-            {Object.values(boxes).filter(b=>b.members.includes(session.userId)).map(b => {
+            <div style={{fontSize:11, fontWeight:600, color:textMuted, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:10}}>在庫ボックス</div>
+            {Object.values(boxes).filter(b=>b.members?.[session.userId]).map(b => {
               const count = Object.values(items).filter(i=>i.boxId===b.id).length;
-              const foodCount = Object.values(items).filter(i=>i.boxId===b.id&&FOOD_CATS.includes(i.category)).length;
               return (
-                <div key={b.id} className='pressable' onClick={()=>{const s={...session,boxId:b.id};setSession(s);save(KEYS.SESSION,s);setCurrentBox(b.id);setScreen('box');}}
+                <div key={b.id} className='pressable' onClick={async ()=>{
+                  saveSession({...session, boxId:b.id});
+                  setCurrentBox(b.id);
+                  setScreen('box');
+                }}
                   style={{...S.card, marginBottom:8, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'space-between'}}>
                   <div style={{display:'flex', alignItems:'center', gap:14}}>
                     <div style={{background:'#f5f5f3', borderRadius:14, width:52, height:52, display:'flex', alignItems:'center', justifyContent:'center'}}>
                       <BoxIcon k={b.icon} size={40} />
                     </div>
                     <div>
-                      <div style={{fontWeight:600, fontSize:15, letterSpacing:'-0.01em'}}>{b.name}</div>
-                      <div style={{color:textMuted, fontSize:12, marginTop:2}}>{b.members.length} members · {foodCount} food · {count-foodCount} supplies</div>
+                      <div style={{fontWeight:600, fontSize:15}}>{b.name}</div>
+                      <div style={{color:textMuted, fontSize:12, marginTop:2}}>{Object.keys(b.members||{}).length}人 · {count}品</div>
                     </div>
                   </div>
                   <span style={{color:border, fontSize:20}}>›</span>
@@ -385,9 +453,10 @@ export default function App() {
             })}
           </div>
         )}
+
         <div style={{...S.card, marginBottom:10, border:'1.5px dashed ' + border}}>
-          <div style={{fontWeight:700, marginBottom:16, fontSize:15, letterSpacing:'-0.01em'}}>New Box</div>
-          <label style={S.label}>Icon</label>
+          <div style={{fontWeight:700, marginBottom:16, fontSize:15}}>新しい在庫ボックスを作る</div>
+          <label style={S.label}>アイコンを選ぼう</label>
           <div style={{display:'flex', gap:6, flexWrap:'wrap', marginTop:8, marginBottom:16}}>
             {BOX_ICON_KEYS.map(k=>(
               <button key={k} onClick={()=>setForm(p=>({...p,boxIcon:k}))} title={BOX_LABELS[k]}
@@ -396,14 +465,15 @@ export default function App() {
               </button>
             ))}
           </div>
-          <label style={S.label}>Box name</label>
-          <input style={S.input} placeholder='e.g. Kitchen, Bathroom' value={form.boxName||''} onChange={e=>setForm(p=>({...p,boxName:e.target.value}))} />
-          <button className='pressable' style={S.btn()} onClick={createBox}>Create box</button>
+          <label style={S.label}>ボックス名</label>
+          <input style={S.input} placeholder='例：キッチン・洗面台' value={form.boxName||''} onChange={e=>setForm(p=>({...p,boxName:e.target.value}))} />
+          <button className='pressable' style={S.btn()} onClick={createBox}>作成する</button>
         </div>
+
         <div style={{...S.card, border:'1.5px dashed ' + border}}>
-          <div style={{fontWeight:700, marginBottom:12, fontSize:15, letterSpacing:'-0.01em'}}>Join with invite code</div>
+          <div style={{fontWeight:700, marginBottom:12, fontSize:15}}>招待コードで参加</div>
           <input style={S.input} placeholder='XX-XX-XX-XX' value={inviteInput} onChange={e=>setInviteInput(e.target.value)} />
-          <button className='pressable' style={S.btn('#374151')} onClick={joinBox}>Join</button>
+          <button className='pressable' style={S.btn('#374151')} onClick={joinBox}>参加する</button>
         </div>
         <div style={{height:40}} />
       </div>
@@ -419,55 +489,61 @@ export default function App() {
         <div style={S.wrap}>
           <div style={S.hdr}>
             <div>
-              <button onClick={()=>setScreen('home')} style={{background:'none',border:'none',color:textMuted,cursor:'pointer',fontSize:13,padding:0,fontFamily:'inherit',fontWeight:500}}>← Back</button>
+              <button onClick={()=>setScreen('home')} style={{background:'none',border:'none',color:textMuted,cursor:'pointer',fontSize:13,padding:0,fontFamily:'inherit',fontWeight:500}}>← 戻る</button>
               <div style={{display:'flex', alignItems:'center', gap:8, marginTop:2}}>
                 <BoxIcon k={box?.icon} size={24} />
                 <span style={{fontWeight:700, fontSize:17, letterSpacing:'-0.02em'}}>{box?.name}</span>
               </div>
-              <div style={{color:textMuted, fontSize:12, marginTop:1}}>{box?.members.length} members · {boxItems.length} items</div>
+              <div style={{color:textMuted, fontSize:12, marginTop:1}}>{memberCount}人 · {boxItems.length}品</div>
             </div>
             <div style={{display:'flex', gap:6}}>
               <button onClick={()=>setShowInvite(!showInvite)} style={S.iconBtn}>🔗</button>
               <button onClick={()=>setScreen('settings')} style={S.iconBtn}>⚙️</button>
             </div>
           </div>
+
           {showInvite && (
             <div style={{...S.card, marginBottom:14, animation:'fadeUp 0.2s ease'}}>
-              <div style={{fontSize:11, fontWeight:600, color:textMuted, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:8}}>Invite Code</div>
+              <div style={{fontSize:11, fontWeight:600, color:textMuted, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:8}}>招待コード</div>
               <div style={{background:'#f5f5f3', borderRadius:12, padding:'14px', fontFamily:'monospace', fontSize:20, fontWeight:700, color:accent, textAlign:'center', letterSpacing:4}}>{box?.inviteCode}</div>
-              <div style={{color:textMuted, fontSize:12, marginTop:8, textAlign:'center'}}>Share this code to invite family members</div>
-              {box?.ownerId===session.userId && <button className='pressable' style={S.btnGhost} onClick={refreshCode}>Refresh code</button>}
+              <div style={{color:textMuted, fontSize:12, marginTop:8, textAlign:'center'}}>このコードを家族に共有してください</div>
+              {box?.ownerId===session.userId && <button className='pressable' style={S.btnGhost} onClick={refreshCode}>コードを再発行</button>}
             </div>
           )}
-          {expiredItems.length > 0 && <div style={{background:'#fef2f2', border:'1px solid #fecaca', borderRadius:12, padding:'10px 14px', marginBottom:10, fontSize:13, fontWeight:600, color:danger}}>⚠ {expiredItems.length} item{expiredItems.length>1?'s':''} expired</div>}
-          {expiringItems.length > 0 && <div style={{background:'#fffbeb', border:'1px solid #fde68a', borderRadius:12, padding:'10px 14px', marginBottom:10, fontSize:13, fontWeight:600, color:'#d97706'}}>⏳ {expiringItems.length} item{expiringItems.length>1?'s':''} expiring soon</div>}
-          {scanning && <div style={{background:accentLight, border:'1px solid #c7d2fe', borderRadius:12, padding:'12px 14px', marginBottom:12, fontSize:13, fontWeight:600, color:accent, animation:'fadeUp 0.2s ease'}}>{scanMsg}</div>}
+
+          {expiredItems.length > 0 && <div style={{background:'#fef2f2', border:'1px solid #fecaca', borderRadius:12, padding:'10px 14px', marginBottom:10, fontSize:13, fontWeight:600, color:danger}}>⚠ 期限切れ {expiredItems.length}品</div>}
+          {expiringItems.length > 0 && <div style={{background:'#fffbeb', border:'1px solid #fde68a', borderRadius:12, padding:'10px 14px', marginBottom:10, fontSize:13, fontWeight:600, color:'#d97706'}}>⏳ もうすぐ期限 {expiringItems.length}品（3日以内）</div>}
+          {scanning && <div style={{background:accentLight, border:'1px solid #c7d2fe', borderRadius:12, padding:'12px 14px', marginBottom:12, fontSize:13, fontWeight:600, color:accent}}>{scanMsg}</div>}
+
           <div style={{display:'flex', gap:4, marginBottom:12, background:'#f0f0ef', borderRadius:12, padding:3}}>
-            {[['all','All'],['food','Food'],['supply','Supplies']].map(([v,l])=>(
+            {[['all','すべて'],['food','食料品'],['supply','備品']].map(([v,l])=>(
               <button key={v} onClick={()=>setFilterType(v)} style={{flex:1, padding:'7px', borderRadius:9, border:'none', cursor:'pointer', fontSize:12, fontWeight:600, fontFamily:'inherit', background:filterType===v?cardBg:'transparent', color:filterType===v?text:textMuted, boxShadow:filterType===v?'0 1px 3px rgba(0,0,0,0.08)':'none', transition:'all 0.15s'}}>{l}</button>
             ))}
           </div>
+
           <div style={{display:'flex', gap:6, marginBottom:12, overflowX:'auto', paddingBottom:4}}>
-            <button onClick={()=>setFilterCat('all')} style={{padding:'6px 12px', borderRadius:20, border:'none', cursor:'pointer', fontSize:11, fontWeight:600, fontFamily:'inherit', background:filterCat==='all'?accent:'#f0f0ef', color:filterCat==='all'?'#fff':textMuted, flexShrink:0}}>All</button>
+            <button onClick={()=>setFilterCat('all')} style={{padding:'6px 12px', borderRadius:20, border:'none', cursor:'pointer', fontSize:11, fontWeight:600, fontFamily:'inherit', background:filterCat==='all'?accent:'#f0f0ef', color:filterCat==='all'?'#fff':textMuted, flexShrink:0}}>すべて</button>
             {ALL_CATS.map(cat=>(
               <button key={cat} onClick={()=>setFilterCat(cat)} style={{whiteSpace:'nowrap', padding:'6px 12px', borderRadius:20, border:'none', cursor:'pointer', fontSize:11, fontWeight:600, fontFamily:'inherit', background:filterCat===cat?CAT_COLORS[cat]:'#f0f0ef', color:filterCat===cat?'#333':textMuted, flexShrink:0}}>
                 {CAT_ICONS[cat]} {cat}
               </button>
             ))}
           </div>
+
           <div style={{display:'flex', gap:8, marginBottom:16, alignItems:'center'}}>
-            <span style={{fontSize:12, color:textMuted, fontWeight:500, whiteSpace:'nowrap'}}>Sort:</span>
+            <span style={{fontSize:12, color:textMuted, fontWeight:500, whiteSpace:'nowrap'}}>並び替え:</span>
             <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{...S.input, marginTop:0, padding:'7px 12px', fontSize:12, width:'auto'}}>
-              <option value='name'>Name</option>
-              <option value='expiry'>Expiry</option>
-              <option value='added'>Added</option>
+              <option value='name'>名前順</option>
+              <option value='expiry'>賞味期限順</option>
+              <option value='added'>追加日順</option>
             </select>
           </div>
+
           {filteredItems.length===0 ? (
             <div style={{textAlign:'center', padding:'56px 0', color:textMuted}}>
               <div style={{fontSize:44, marginBottom:12}}>📭</div>
-              <div style={{fontWeight:600, fontSize:15}}>Nothing here yet</div>
-              <div style={{fontSize:13, marginTop:4}}>Tap + to add items</div>
+              <div style={{fontWeight:600, fontSize:15}}>在庫がありません</div>
+              <div style={{fontSize:13, marginTop:4}}>＋ボタンから追加してください</div>
             </div>
           ) : filteredItems.map(item => {
             const exp=isExpired(item.expiry), expi=isExpiringSoon(item.expiry), byUser=users[item.addedBy];
@@ -478,14 +554,14 @@ export default function App() {
                 <div style={{fontSize:26, flexShrink:0, background:catColor, borderRadius:12, width:48, height:48, display:'flex', alignItems:'center', justifyContent:'center'}}>{CAT_ICONS[item.category]||'📦'}</div>
                 <div style={{flex:1, minWidth:0}}>
                   <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:4, flexWrap:'wrap'}}>
-                    <span style={{fontWeight:600, fontSize:15, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', letterSpacing:'-0.01em'}}>{item.name}</span>
-                    {exp && <span style={{...S.tag('#fef2f2','#ef4444')}}>Expired</span>}
-                    {!exp&&expi && <span style={{...S.tag('#fffbeb','#d97706')}}>Soon</span>}
-                    {isSupply && <span style={{...S.tag('#f5f5f3',textMuted)}}>Supply</span>}
+                    <span style={{fontWeight:600, fontSize:15, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{item.name}</span>
+                    {exp && <span style={S.tag('#fef2f2','#ef4444')}>期限切れ</span>}
+                    {!exp&&expi && <span style={S.tag('#fffbeb','#d97706')}>期限間近</span>}
+                    {isSupply && <span style={S.tag('#f5f5f3',textMuted)}>備品</span>}
                   </div>
                   <div style={{display:'flex', gap:6, flexWrap:'wrap', alignItems:'center'}}>
-                    <span style={{...S.tag(catColor,'#555')}}>{item.category}</span>
-                    <span style={{color:textMuted, fontSize:12, fontWeight:500}}>{item.quantity}{item.unit}</span>
+                    <span style={S.tag(catColor,'#555')}>{item.category}</span>
+                    <span style={{color:textMuted, fontSize:12}}>{item.quantity}{item.unit}</span>
                     {item.expiry && <span style={{color:exp?danger:expi?'#d97706':textMuted, fontSize:11}}>📅 {item.expiry}</span>}
                     {item.purchaseDate && <span style={{color:textMuted, fontSize:11}}>🛒 {item.purchaseDate}</span>}
                     <span style={{color:'#d1d5db', fontSize:11}}>by {byUser?.name||'?'}</span>
@@ -498,15 +574,17 @@ export default function App() {
           })}
           <div style={{height:100}} />
         </div>
+
         <input ref={barcodeRef} type='file' accept='image/*' capture='environment' style={{display:'none'}} onChange={e=>{if(e.target.files[0])handleBarcode(e.target.files[0]);e.target.value='';}} />
         <input ref={receiptRef} type='file' accept='image/*' style={{display:'none'}} onChange={e=>{if(e.target.files[0])handleReceipt(e.target.files[0]);e.target.value='';}} />
+
         {showAddMenu && (
           <div style={{position:'fixed', inset:0, zIndex:150, background:'rgba(0,0,0,0.2)', backdropFilter:'blur(2px)'}} onClick={()=>setShowAddMenu(false)}>
             <div style={{position:'fixed', bottom:96, right:20, display:'flex', flexDirection:'column', gap:8, alignItems:'flex-end'}} onClick={e=>e.stopPropagation()}>
               {[
-                {label:'Type manually', bg:'#374151', action:()=>{setShowAddMenu(false);setForm({purchaseDate:today()});setScreen('addItem');}},
-                {label:'Scan receipt', bg:'#0891b2', action:()=>receiptRef.current?.click()},
-                {label:'Scan barcode', bg:accent, action:()=>barcodeRef.current?.click()},
+                {label:'手動で入力', bg:'#374151', action:()=>{setShowAddMenu(false);setForm({purchaseDate:today()});setScreen('addItem');}},
+                {label:'レシートを読み取り', bg:'#0891b2', action:()=>receiptRef.current?.click()},
+                {label:'バーコードをスキャン', bg:accent, action:()=>barcodeRef.current?.click()},
               ].map(({label,bg,action}) => (
                 <button key={label} className='pressable' onClick={action}
                   style={{background:bg, color:'#fff', border:'none', borderRadius:50, padding:'11px 20px', fontSize:14, fontWeight:600, cursor:'pointer', fontFamily:'inherit', boxShadow:'0 4px 16px rgba(0,0,0,0.2)', animation:'fadeUp 0.2s ease', whiteSpace:'nowrap'}}>
@@ -516,16 +594,18 @@ export default function App() {
             </div>
           </div>
         )}
+
         <button className='pressable' onClick={()=>setShowAddMenu(!showAddMenu)}
           style={{position:'fixed', bottom:24, right:24, width:56, height:56, borderRadius:'50%', background:showAddMenu?danger:accent, border:'none', color:'#fff', fontSize:26, cursor:'pointer', zIndex:160, display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 20px rgba(99,102,241,0.4)', transition:'all 0.2s', transform:showAddMenu?'rotate(45deg)':'rotate(0deg)'}}>+</button>
+
         {confirmDelete && (
           <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.3)', zIndex:200, display:'flex', alignItems:'center', justifyContent:'center', padding:'0 20px', backdropFilter:'blur(2px)'}}>
             <div style={{...S.card, maxWidth:340, width:'100%', animation:'scaleIn 0.2s ease', textAlign:'center', padding:'28px 24px'}}>
               <div style={{fontSize:40, marginBottom:10}}>🗑</div>
-              <div style={{fontWeight:700, fontSize:16, marginBottom:6, letterSpacing:'-0.02em'}}>Delete "{confirmDelete.name}"?</div>
-              <div style={{color:textMuted, fontSize:13, marginBottom:20}}>This cannot be undone.</div>
-              <button className='pressable' style={S.btn(danger)} onClick={()=>deleteItem(confirmDelete.id)}>Delete</button>
-              <button className='pressable' style={S.btnGhost} onClick={()=>setConfirmDelete(null)}>Cancel</button>
+              <div style={{fontWeight:700, fontSize:16, marginBottom:6}}>「{confirmDelete.name}」を削除しますか？</div>
+              <div style={{color:textMuted, fontSize:13, marginBottom:20}}>この操作は元に戻せません</div>
+              <button className='pressable' style={S.btn(danger)} onClick={()=>deleteItem(confirmDelete.id)}>削除する</button>
+              <button className='pressable' style={S.btnGhost} onClick={()=>setConfirmDelete(null)}>キャンセル</button>
             </div>
           </div>
         )}
@@ -538,13 +618,13 @@ export default function App() {
     <div style={S.app}><style>{CSS}</style>
       <div style={S.wrap}>
         <div style={S.hdr}>
-          <button onClick={()=>{setScannedItems([]);setScreen('box');}} style={S.iconBtn}>← Cancel</button>
-          <span style={{fontWeight:700, fontSize:16}}>Scan result</span>
+          <button onClick={()=>{setScannedItems([]);setScreen('box');}} style={S.iconBtn}>← キャンセル</button>
+          <span style={{fontWeight:700, fontSize:16}}>読み取り結果</span>
           <div style={{width:80}} />
         </div>
         <div style={{...S.card, marginBottom:14, background:accentLight, border:'1px solid #c7d2fe', textAlign:'center'}}>
-          <div style={{fontWeight:700, color:accent, fontSize:15}}>{scannedItems.length} items detected</div>
-          <div style={{color:textMuted, fontSize:12, marginTop:2}}>Review and confirm below</div>
+          <div style={{fontWeight:700, color:accent, fontSize:15}}>{scannedItems.length}品を検出しました</div>
+          <div style={{color:textMuted, fontSize:12, marginTop:2}}>確認して登録してください</div>
         </div>
         {scannedItems.map((item,i) => (
           <div key={i} style={{...S.card, marginBottom:8, display:'flex', alignItems:'center', gap:12}}>
@@ -552,7 +632,7 @@ export default function App() {
             <div style={{flex:1}}>
               <div style={{fontWeight:600, fontSize:15}}>{item.name}</div>
               <div style={{display:'flex', gap:6, flexWrap:'wrap', marginTop:4}}>
-                <span style={{...S.tag(CAT_COLORS[item.category]||'#f1f5f9','#555')}}>{item.category}</span>
+                <span style={S.tag(CAT_COLORS[item.category]||'#f1f5f9','#555')}>{item.category}</span>
                 <span style={{color:textMuted, fontSize:12}}>{item.quantity}{item.unit}</span>
                 {item.purchaseDate && <span style={{color:textMuted, fontSize:12}}>🛒 {item.purchaseDate}</span>}
               </div>
@@ -560,8 +640,8 @@ export default function App() {
             <button onClick={()=>setScannedItems(scannedItems.filter((_,j)=>j!==i))} style={{background:'#fef2f2', border:'none', color:danger, borderRadius:10, padding:'6px 10px', cursor:'pointer', fontSize:14, flexShrink:0}}>✕</button>
           </div>
         ))}
-        <button className='pressable' style={S.btn()} onClick={confirmAndAddScanned}>Add {scannedItems.length} items</button>
-        <button className='pressable' style={S.btnGhost} onClick={()=>{setScannedItems([]);setScreen('box');}}>Cancel</button>
+        <button className='pressable' style={S.btn()} onClick={confirmAndAddScanned}>{scannedItems.length}品をまとめて登録</button>
+        <button className='pressable' style={S.btnGhost} onClick={()=>{setScannedItems([]);setScreen('box');}}>キャンセル</button>
         <div style={{height:40}} />
       </div>
     </div>
@@ -571,12 +651,12 @@ export default function App() {
     <div style={S.app}><style>{CSS}</style>
       <div style={S.wrap}>
         <div style={S.hdr}>
-          <button onClick={()=>{setPendingItems([]);setScreen('box');}} style={S.iconBtn}>← Cancel</button>
-          <span style={{fontWeight:700, fontSize:16}}>Confirm categories</span>
+          <button onClick={()=>{setPendingItems([]);setScreen('box');}} style={S.iconBtn}>← キャンセル</button>
+          <span style={{fontWeight:700, fontSize:16}}>カテゴリを確認</span>
           <div style={{width:80}} />
         </div>
         <div style={{...S.card, marginBottom:14, background:'#fffbeb', border:'1px solid #fde68a'}}>
-          <div style={{fontWeight:600, color:'#d97706', fontSize:13}}>Some items need category confirmation</div>
+          <div style={{fontWeight:600, color:'#d97706', fontSize:13}}>一部の商品のカテゴリを確認してください</div>
         </div>
         {pendingItems.map((item,i) => (
           <div key={i} style={{...S.card, marginBottom:10}}>
@@ -584,14 +664,14 @@ export default function App() {
             <div style={{display:'flex', gap:6, flexWrap:'wrap'}}>
               {ALL_CATS.map(cat=>(
                 <button key={cat} onClick={()=>{const ni=[...pendingItems];ni[i]={...ni[i],category:cat};setPendingItems(ni);}}
-                  style={{padding:'5px 10px', borderRadius:10, border:'none', cursor:'pointer', fontSize:11, fontWeight:600, fontFamily:'inherit', background:item.category===cat?CAT_COLORS[cat]:'#f5f5f3', color:item.category===cat?'#333':textMuted, transition:'all 0.12s'}}>
+                  style={{padding:'5px 10px', borderRadius:10, border:'none', cursor:'pointer', fontSize:11, fontWeight:600, fontFamily:'inherit', background:item.category===cat?CAT_COLORS[cat]:'#f5f5f3', color:item.category===cat?'#333':textMuted}}>
                   {CAT_ICONS[cat]} {cat}
                 </button>
               ))}
             </div>
           </div>
         ))}
-        <button className='pressable' style={S.btn()} onClick={()=>{setScannedItems(pendingItems);setPendingItems([]);setScreen('scanResult');}}>Confirm →</button>
+        <button className='pressable' style={S.btn()} onClick={()=>{setScannedItems(pendingItems);setPendingItems([]);setScreen('scanResult');}}>確認完了 →</button>
         <div style={{height:40}} />
       </div>
     </div>
@@ -603,26 +683,26 @@ export default function App() {
       <div style={S.app}><style>{CSS}</style>
         <div style={S.wrap}>
           <div style={S.hdr}>
-            <button onClick={()=>{setScreen('box');setForm({});setEditingItem(null);}} style={S.iconBtn}>← Cancel</button>
-            <span style={{fontWeight:700, fontSize:16}}>{isEdit?'Edit item':'Add item'}</span>
+            <button onClick={()=>{setScreen('box');setForm({});setEditingItem(null);}} style={S.iconBtn}>← キャンセル</button>
+            <span style={{fontWeight:700, fontSize:16}}>{isEdit?'在庫を編集':'在庫を追加'}</span>
             <div style={{width:72}} />
           </div>
           <div style={S.card}>
-            <div style={{marginBottom:14}}><label style={S.label}>Item name *</label><input style={S.input} placeholder='e.g. Milk' value={form.itemName||''} onChange={e=>setForm(p=>({...p,itemName:e.target.value}))} /></div>
-            <div style={{marginBottom:14}}><label style={S.label}>Category</label>
+            <div style={{marginBottom:14}}><label style={S.label}>品名 *</label><input style={S.input} placeholder='例：牛乳' value={form.itemName||''} onChange={e=>setForm(p=>({...p,itemName:e.target.value}))} /></div>
+            <div style={{marginBottom:14}}><label style={S.label}>カテゴリ</label>
               <select style={S.input} value={form.category||'食料品その他'} onChange={e=>setForm(p=>({...p,category:e.target.value}))}>
-                <optgroup label='Food'>{FOOD_CATS.map(c=><option key={c} value={c}>{CAT_ICONS[c]} {c}</option>)}</optgroup>
-                <optgroup label='Supplies'>{SUPPLY_CATS.map(c=><option key={c} value={c}>{CAT_ICONS[c]} {c}</option>)}</optgroup>
+                <optgroup label='食料品'>{FOOD_CATS.map(c=><option key={c} value={c}>{CAT_ICONS[c]} {c}</option>)}</optgroup>
+                <optgroup label='備品・日用品'>{SUPPLY_CATS.map(c=><option key={c} value={c}>{CAT_ICONS[c]} {c}</option>)}</optgroup>
               </select>
             </div>
             <div style={{display:'flex', gap:12, marginBottom:14}}>
-              <div style={{flex:1}}><label style={S.label}>Quantity</label><input style={S.input} type='number' min='0' step='0.1' placeholder='1' value={form.quantity||''} onChange={e=>setForm(p=>({...p,quantity:e.target.value}))} /></div>
-              <div style={{flex:1}}><label style={S.label}>Unit</label><input style={S.input} placeholder='pcs / ml / g' value={form.unit||''} onChange={e=>setForm(p=>({...p,unit:e.target.value}))} /></div>
+              <div style={{flex:1}}><label style={S.label}>数量</label><input style={S.input} type='number' min='0' step='0.1' placeholder='1' value={form.quantity||''} onChange={e=>setForm(p=>({...p,quantity:e.target.value}))} /></div>
+              <div style={{flex:1}}><label style={S.label}>単位</label><input style={S.input} placeholder='個・本・袋' value={form.unit||''} onChange={e=>setForm(p=>({...p,unit:e.target.value}))} /></div>
             </div>
-            <div style={{marginBottom:14}}><label style={S.label}>Expiry date</label><input style={S.input} type='date' value={form.expiry||''} onChange={e=>setForm(p=>({...p,expiry:e.target.value}))} /></div>
-            <div style={{marginBottom:14}}><label style={S.label}>Purchase date</label><input style={S.input} type='date' value={form.purchaseDate||''} onChange={e=>setForm(p=>({...p,purchaseDate:e.target.value}))} /></div>
-            <div style={{marginBottom:8}}><label style={S.label}>Note</label><input style={S.input} placeholder='e.g. Opened, Low stock' value={form.note||''} onChange={e=>setForm(p=>({...p,note:e.target.value}))} /></div>
-            <button className='pressable' style={S.btn()} onClick={isEdit?updateItem:addItem}>{isEdit?'Update':'Add item'}</button>
+            <div style={{marginBottom:14}}><label style={S.label}>賞味期限</label><input style={S.input} type='date' value={form.expiry||''} onChange={e=>setForm(p=>({...p,expiry:e.target.value}))} /></div>
+            <div style={{marginBottom:14}}><label style={S.label}>購入日</label><input style={S.input} type='date' value={form.purchaseDate||''} onChange={e=>setForm(p=>({...p,purchaseDate:e.target.value}))} /></div>
+            <div style={{marginBottom:8}}><label style={S.label}>メモ</label><input style={S.input} placeholder='例：開封済み・残り少ない' value={form.note||''} onChange={e=>setForm(p=>({...p,note:e.target.value}))} /></div>
+            <button className='pressable' style={S.btn()} onClick={isEdit?updateItem:addItem}>{isEdit?'更新する':'追加する'}</button>
           </div>
           <div style={{height:40}} />
         </div>
