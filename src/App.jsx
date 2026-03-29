@@ -36,10 +36,8 @@ const genId = () => crypto.getRandomValues(new Uint32Array(2)).reduce((a, b) => 
 const genCode = () => Array.from(crypto.getRandomValues(new Uint8Array(4))).map(b => b.toString(36).toUpperCase().padStart(2, '0')).join('-');
 const today = () => new Date().toISOString().split('T')[0];
 
-const LS_KEYS = ['hs-session', 'fs-session'];
 const lsGet = (k, fb) => {
-  const variants = [k, ...LS_KEYS.filter(x => x !== k)];
-  for (const key of variants) {
+  for (const key of [k, k.replace('hs-','fs-'), k.replace('fs-','hs-')]) {
     try { const v = localStorage.getItem(key); if (v !== null) return JSON.parse(v); } catch {}
   }
   return fb;
@@ -397,6 +395,7 @@ export default function App() {
           <div style={{background:'#f5f5f3', borderRadius:12, padding:'14px', fontFamily:'monospace', fontSize:22, fontWeight:700, color:accent, textAlign:'center', letterSpacing:4}}>
             {user?.inviteCode || '----'}
           </div>
+          <button className='pressable' style={S.btn()} onClick={()=>{navigator.clipboard.writeText(user?.inviteCode||'');showToast('招待コードをコピーしました！','success');}}>コピーする</button>
         </div>
         <div style={{...S.card, marginBottom:12}}>
           <div style={{fontWeight:700, marginBottom:4, fontSize:15}}>家族を追加</div>
@@ -446,8 +445,9 @@ export default function App() {
           </div>
           <button onClick={()=>setScreen('settings')} style={S.iconBtn}>⚙️</button>
         </div>
+
         {visibleBoxes.length > 0 && (
-          <div style={{marginBottom:24}}>
+          <div style={{marginBottom:20}}>
             <div style={{fontSize:11, fontWeight:600, color:textMuted, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:10}}>在庫ボックス</div>
             {visibleBoxes.map(b => {
               const owner = users[b.ownerId];
@@ -470,6 +470,7 @@ export default function App() {
             })}
           </div>
         )}
+
         <div style={{...S.card, marginBottom:10, border:'1.5px dashed ' + border}}>
           <div style={{fontWeight:700, marginBottom:16, fontSize:15}}>新しい在庫ボックスを作る</div>
           <label style={S.label}>アイコンを選ぼう</label>
@@ -485,6 +486,16 @@ export default function App() {
           <input style={S.input} placeholder='例：キッチン・洗面台' value={form.boxName||''} onChange={e=>setForm(p=>({...p,boxName:e.target.value}))} />
           <button className='pressable' style={S.btn()} onClick={createBox}>作成する</button>
         </div>
+
+        <div style={{...S.card, marginBottom:10, border:'1.5px dashed ' + border}}>
+          <div style={{fontWeight:700, marginBottom:8, fontSize:15}}>家族を招待する</div>
+          <p style={{color:textMuted, fontSize:13, margin:'0 0 12px', lineHeight:1.5}}>このコードを家族に送ると、お互いの全ボックスを共有できます。</p>
+          <div style={{background:'#f5f5f3', borderRadius:12, padding:'12px 16px', fontFamily:'monospace', fontSize:20, fontWeight:700, color:accent, textAlign:'center', letterSpacing:4, marginBottom:8}}>
+            {user?.inviteCode || '----'}
+          </div>
+          <button className='pressable' style={S.btn()} onClick={()=>{navigator.clipboard.writeText(user?.inviteCode||'');showToast('招待コードをコピーしました！','success');}}>コピーする</button>
+        </div>
+
         <div style={{height:40}} />
       </div>
       {toast && <div style={S.toast(toast.type)}>{toast.msg}</div>}
