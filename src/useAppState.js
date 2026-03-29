@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { db } from '../firebase';
+import { db } from './firebase';
 import { ref, set, get, onValue, update, remove } from 'firebase/database';
-import { genId, genCode, today, hashPassword, lsGet, lsSet } from '../utils';
-import { lookupBarcode, analyzeReceipt, estimateExpiry } from '../api';
-import { DEFAULT_ALL_CATS, DEFAULT_CAT_ICONS, DEFAULT_CAT_COLORS } from '../constants';
+import { genId, genCode, today, hashPassword, lsGet, lsSet } from './utils';
+import { lookupBarcode, analyzeReceipt, estimateExpiry } from './api';
+import { DEFAULT_ALL_CATS, DEFAULT_CAT_ICONS, DEFAULT_CAT_COLORS } from './constants';
 
 export function useAppState() {
   const [screen, setScreen] = useState('loading');
@@ -38,7 +38,7 @@ export function useAppState() {
   const [newCatIcon, setNewCatIcon] = useState('📦');
   const [newCatColor, setNewCatColor] = useState('#f1f5f9');
   const [shortageList, setShortageList] = useState({});
-  const [shortageForm, setShortageForm] = useState({ name:'', quantity:'1', unit:'個' });
+  const [shortageForm, setShortageForm] = useState({ name: '', quantity: '1', unit: '個' });
   const [showShortageAdd, setShowShortageAdd] = useState(false);
   const [buyingItem, setBuyingItem] = useState(null);
   const [buyBoxId, setBuyBoxId] = useState('');
@@ -348,7 +348,6 @@ export function useAppState() {
     .sort((a, b) => sortBy === 'name' ? a.name.localeCompare(b.name, 'ja') : sortBy === 'expiry' ? (a.expiry || '9999') < (b.expiry || '9999') ? -1 : 1 : b.addedAt - a.addedAt);
 
   return {
-    // state
     screen, setScreen, users, boxes, items, session, currentBox, setCurrentBox,
     currentUser, editingItem, editingBox, setEditingBox, toast, authMode, setAuthMode,
     form, setForm, filterCat, setFilterCat, filterType, setFilterType, sortBy, setSortBy,
@@ -359,10 +358,8 @@ export function useAppState() {
     shortageList, shortageForm, setShortageForm, showShortageAdd, setShowShortageAdd,
     buyingItem, setBuyingItem, buyBoxId, setBuyBoxId, estimatingExpiry,
     receiptRef, barcodeRef, shortageBarcodeRef,
-    // computed
     cats, catIcons, catColors, box, boxEnabledCats, boxItems, shortageItems,
     visibleBoxes, filteredItems, expiredAll, expiringAll,
-    // actions
     showToast, saveSession, addCat, deleteCat, addShortage, removeShortage,
     handleBought, handleRegister, handleLogin, handleLogout, addFriend,
     createBox, updateBox, addItem, updateItem, deleteItem, openEditItem,
