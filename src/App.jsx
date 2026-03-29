@@ -77,7 +77,7 @@ async function analyzeReceipt(apiKey, base64Image, mimeType) {
 
 const GUIDE_STEPS = [
   { icon: '📦', title: '在庫ボックスを作ろう', desc: '冷蔵庫・棚・洗面台など、場所ごとにボックスを作って管理できます。' },
-  { icon: '👨‍👩‍👧', title: '家族を招待しよう', desc: 'ホーム画面の招待コードを家族に送るだけ。一度で全ボックスを共有できます。' },
+  { icon: '👨‍👩‍👧', title: '家族を招待しよう', desc: 'ホーム画面の招待ボタンから家族に共有。一度で全ボックスを共有できます。' },
   { icon: '📷', title: '3つの方法で追加', desc: 'バーコードスキャン・レシート読み取り・手動入力で簡単に在庫を登録できます。' },
   { icon: '⏰', title: '期限を管理しよう', desc: '賞味期限が近づくと自動でお知らせ。食品ロスを減らせます。' },
 ];
@@ -108,6 +108,7 @@ export default function App() {
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [guideStep, setGuideStep] = useState(null);
   const [friends, setFriends] = useState({});
+  const [showCode, setShowCode] = useState(false);
   const receiptRef = useRef(null);
   const barcodeRef = useRef(null);
 
@@ -121,10 +122,7 @@ export default function App() {
     if (s?.userId) {
       setSession(s);
       if (s.boxId) setCurrentBox(s.boxId);
-      // 自分のユーザー情報をリアルタイム監視
-      onValue(ref(db, 'users/' + s.userId), snap => {
-        if (snap.val()) setCurrentUser(snap.val());
-      });
+      onValue(ref(db, 'users/' + s.userId), snap => { if (snap.val()) setCurrentUser(snap.val()); });
       onValue(ref(db, 'users'), snap => { if (snap.val()) setUsers(snap.val()); });
       onValue(ref(db, 'boxes'), snap => { setBoxes(snap.val() || {}); });
       onValue(ref(db, 'friends/' + s.userId), snap => { setFriends(snap.val() || {}); });
@@ -479,9 +477,10 @@ export default function App() {
           <label style={S.label}>アイコンを選ぼう</label>
           <div style={{display:'flex', gap:6, flexWrap:'wrap', marginTop:8, marginBottom:16}}>
             {BOX_ICON_KEYS.map(k=>(
-              <button key={k} onClick={()=>setForm(p=>({...p,boxIcon:k}))} title={BOX_LABELS[k]}
-                style={{background:form.boxIcon===k?accentLight:'#f5f5f3', border:form.boxIcon===k?'1.5px solid '+accent:'1.5px solid transparent', borderRadius:12, padding:'8px', cursor:'pointer', transition:'all 0.15s'}}>
-                <BoxIcon k={k} size={40} />
+              <button key={k} onClick={()=>setForm(p=>({...p,boxIcon:k}))}
+                style={{background:form.boxIcon===k?accentLight:'#f5f5f3', border:form.boxIcon===k?'1.5px solid '+accent:'1.5px solid transparent', borderRadius:12, padding:'8px 6px', cursor:'pointer', transition:'all 0.15s', display:'flex', flexDirection:'column', alignItems:'center', gap:4, minWidth:60}}>
+                <BoxIcon k={k} size={36} />
+                <span style={{fontSize:9, fontWeight:600, color:form.boxIcon===k?accent:textMuted, textAlign:'center', lineHeight:1.2}}>{BOX_LABELS[k]}</span>
               </button>
             ))}
           </div>
@@ -491,17 +490,24 @@ export default function App() {
         </div>
 
         <div style={{...S.card, marginBottom:10, border:'1.5px dashed ' + border}}>
-          <div style={{fontWeight:700, marginBottom:8, fontSize:15}}>家族を招待する</div>
-          <p style={{color:textMuted, fontSize:13, margin:'0 0 12px', lineHeight:1.5}}>このコードを家族に送ると、お互いの全ボックスを共有できます。</p>
-          <div style={{background:'#f5f5f3', borderRadius:12, padding:'12px 16px', fontFamily:'monospace', fontSize:20, fontWeight:700, color:accent, textAlign:'center', letterSpacing:4, marginBottom:8}}>
-            {currentUser?.inviteCode || '読み込み中...'}
+          <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4}}>
+            <div style={{fontWeight:700, fontSize:15}}>家族を招待する</div>
+            <button onClick={()=>setShowCode(!showCode)} style={{background:'none', border:'none', color:accent, fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit', padding:0}}>
+              {showCode ? '隠す' : 'コードを表示'}
+            </button>
           </div>
+          <p style={{color:textMuted, fontSize:13, margin:'0 0 12px', lineHeight:1.5}}>招待コードを家族に送ると、お互いの全ボックスを共有できます。</p>
+          {showCode && (
+            <div style={{background:'#f5f5f3', borderRadius:12, padding:'12px 16px', fontFamily:'monospace', fontSize:20, fontWeight:700, color:accent, textAlign:'center', letterSpacing:4, marginBottom:8, animation:'fadeUp 0.2s ease'}}>
+              {currentUser?.inviteCode || '読み込み中...'}
+            </div>
+          )}
           <button className='pressable' style={S.btn()} onClick={()=>{
             if (currentUser?.inviteCode) {
               navigator.clipboard.writeText(currentUser.inviteCode);
               showToast('招待コードをコピーしました！', 'success');
             }
-          }}>コピーする</button>
+          }}>招待コードをコピー</button>
         </div>
 
         <div style={{height:40}} />
