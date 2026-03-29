@@ -189,4 +189,443 @@ export default function App() {
 
   const updateItem = () => {
     if (!form.itemName?.trim()) return showToast('品名を入力してください', 'error');
-    persist​​​​​​​​​​​​​​​​
+    persist(null, null, { ...items, [editingItem.id]: { ...items[editingItem.id], name: form.itemName.trim(), category: form.category || '食料品その他', quantity: form.quantity || '1', unit: form.unit || '', expiry: form.expiry || '', purchaseDate: form.purchaseDate || '', note: form.note || '', updatedAt: Date.now() } });
+    setEditingItem(null); setForm({}); showToast('更新しました！✅', 'success'); setScreen('box');
+  };
+
+  const deleteItem = (id) => { const ni = { ...items }; delete ni[id]; persist(null, null, ni); setConfirmDelete(null); showToast('削除しました', 'info'); };
+
+  const openEditItem = (item) => {
+    setEditingItem(item);
+    setForm({ itemName: item.name, category: item.category, quantity: item.quantity, unit: item.unit, expiry: item.expiry, purchaseDate: item.purchaseDate || '', note: item.note });
+    setScreen('editItem');
+  };
+
+  const handleBarcode = async (file) => {
+    setShowAddMenu(false); setScanning(true); setScanMsg('バーコードを読み取り中... 🔍');
+    try {
+      if ('BarcodeDetector' in window) {
+        const detector = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] });
+        const bitmap = await createImageBitmap(file);
+        const codes = await detector.detect(bitmap);
+        if (!codes.length) { showToast('バーコードが読み取れませんでした', 'error'); setScanning(false); return; }
+        setScanMsg('商品情報を検索中... 🔎');
+        const product = await lookupBarcode(codes[0].rawValue);
+        setScanning(false);
+        if (!product) { showToast('DBに商品が見つかりませんでした。手動入力してください', 'error'); setForm({ purchaseDate: today() }); setScreen('addItem'); return; }
+        setForm({ itemName: product.name, category: product.category, quantity: product.quantity, unit: product.unit, purchaseDate: today() });
+        setScreen('addItem'); showToast('商品情報を取得しました！✨', 'success');
+      } else {
+        setScanning(false); showToast('このブラウザはバーコード非対応です', 'error');
+        setForm({ purchaseDate: today() }); setScreen('addItem');
+      }
+    } catch (e) { setScanning(false); showToast('読み取りに失敗しました', 'error'); }
+  };
+
+  const handleReceipt = async (file) => {
+    setShowAddMenu(false);
+    if (!geminiKey) { showToast('設定からGemini APIキーを入力してください', 'error'); setScreen('settings'); return; }
+    setScanning(true); setScanMsg('AIがレシートを解析中... 🤖');
+    try {
+      const base64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
+      const results = await analyzeReceipt(geminiKey, base64, file.type);
+      if (!results.length) { showToast('商品を読み取れませんでした', 'error'); setScanning(false); return; }
+      const hasAmbiguous = results.some(item => !ALL_CATS.includes(item.category));
+      if (hasAmbiguous) { setPendingItems(results); setScanning(false); setScreen('scanConfirm'); }
+      else { setScannedItems(results); setScanning(false); setScreen('scanResult'); }
+    } catch (e) { showToast('読み取りに失敗しました', 'error'); setScanning(false); }
+  };
+
+  const confirmAndAddScanned = () => {
+    const now = Date.now(); const newItems = { ...items };
+    scannedItems.forEach(item => { const id = genId(); newItems[id] = { id, boxId: currentBox, name: item.name, category: item.category || '食料品その他', quantity: item.quantity || '1', unit: item.unit || '', expiry: '', purchaseDate: item.purchaseDate || today(), note: '', addedBy: session.userId, addedAt: now, updatedAt: now }; });
+    persist(null, null, newItems);
+    showToast(scannedItems.length + '品を追加しました！🎉', 'success');
+    setScannedItems([]); setScreen('box');
+  };
+
+  const isExpiringSoon = (e) => { if (!e) return false; const d = (new Date(e) - new Date()) / 86400000; return d >= 0 && d <= 3; };
+  const isExpired = (e) => e && new Date(e) < new Date();
+
+  const box = currentBox ? boxes[currentBox] : null;
+  const user = session ? users[session.userId] : null;
+  const boxItems = currentBox ? Object.values(items).filter(i => i.boxId === currentBox) : [];
+  const filteredItems = boxItems
+    .filter(i => filterCat === 'all' || i.category === filterCat)
+    .filter(i => filterType === 'all' || (filterType === 'food' ? FOOD_CATS.includes(i.category) : SUPPLY_CATS.includes(i.category)))
+    .sort((a, b) => sortBy === 'name' ? a.name.localeCompare(b.name, 'ja') : sortBy === 'expiry' ? (a.expiry || '9999') < (b.expiry || '9999') ? -1 : 1 : b.addedAt - a.addedAt);
+
+  const CSS = `
+    @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
+    * { box-sizing:border-box; }
+    body { margin:0; background:#fef9f0; }
+    select option { background:#fff; color:#333; }
+    input[type=date] { color-scheme:light; }
+    @keyframes pop { 0%{transform:scale(0.8);opacity:0} 60%{transform:scale(1.05)} 100%{transform:scale(1);opacity:1} }
+    @keyframes slideUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+    .card-hover:active { transform:scale(0.97); }
+    .btn-press:active { transform:scale(0.95); }
+    .tag { display:inline-flex;align-items:center;gap:3px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700; }
+  `;
+
+  const S = {
+    app: { minHeight:'100dvh', background:'linear-gradient(160deg,#fff0f9 0%,#f0f4ff 50%,#f0fff9 100%)', fontFamily:"'Nunito',sans-serif", color:'#2d2d2d', position:'relative' },
+    wrap: { maxWidth:440, margin:'0 auto', padding:'0 16px', minHeight:'100dvh' },
+    card: { background:'#fff', borderRadius:24, padding:20, boxShadow:'0 4px 20px rgba(0,0,0,0.07)', border:'2px solid rgba(255,255,255,0.8)' },
+    cardColor: (bg) => ({ background:bg, borderRadius:24, padding:20, boxShadow:'0 4px 20px rgba(0,0,0,0.08)' }),
+    btn: (c='#ff6b9d') => ({ background:c, color:'#fff', border:'none', borderRadius:16, padding:'14px 24px', fontSize:15, fontWeight:800, cursor:'pointer', width:'100%', marginTop:10, boxShadow:'0 4px 12px ' + c + '55', letterSpacing:'0.02em' }),
+    btnOutline: (c='#ff6b9d') => ({ background:'#fff', color:c, border:'2.5px solid ' + c, borderRadius:16, padding:'12px 24px', fontSize:14, fontWeight:800, cursor:'pointer', width:'100%', marginTop:8 }),
+    input: { width:'100%', background:'#fafafa', border:'2.5px solid #f0f0f0', borderRadius:14, padding:'12px 14px', fontSize:15, color:'#2d2d2d', outline:'none', marginTop:6, fontFamily:'inherit', fontWeight:600 },
+    label: { fontSize:11, fontWeight:800, color:'#aaa', textTransform:'uppercase', letterSpacing:'0.1em' },
+    hdr: { display:'flex', alignItems:'center', justifyContent:'space-between', paddingTop:20, paddingBottom:12 },
+    iconBtn: (bg) => ({ background:bg, border:'none', borderRadius:14, padding:'10px 12px', cursor:'pointer', fontSize:18, display:'flex', alignItems:'center', gap:4, fontWeight:800, fontFamily:'inherit' }),
+    toastEl: (t) => ({ position:'fixed', bottom:90, left:'50%', transform:'translateX(-50%)', background:t==='error'?'#ff5b79':t==='success'?'#4ade80':'#60a5fa', color:'#fff', padding:'12px 22px', borderRadius:50, fontSize:14, fontWeight:800, zIndex:1000, whiteSpace:'nowrap', boxShadow:'0 8px 24px rgba(0,0,0,0.15)', animation:'pop 0.3s ease' }),
+  };
+
+  const BoxIcon = ({k, size=44}) => <div dangerouslySetInnerHTML={{__html: BOX_SVG[k] || BOX_SVG['fridge']}} style={{width:size, height:size, display:'flex', alignItems:'center', justifyContent:'center'}} />;
+
+  if (screen === 'loading') return (
+    <div style={{...S.app,display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <style>{CSS}</style>
+      <div style={{textAlign:'center',animation:'pop 0.5s ease'}}>
+        <BoxIcon k='fridge' size={72} />
+        <div style={{fontWeight:800,color:'#ff6b9d',fontSize:18,marginTop:8}}>ホームストック</div>
+        <div style={{color:'#bbb',marginTop:4,fontSize:13}}>読み込み中...</div>
+      </div>
+    </div>
+  );
+
+  if (screen === 'auth') return (
+    <div style={S.app}><style>{CSS}</style>
+      <div style={S.wrap}>
+        <div style={{paddingTop:56,paddingBottom:32,textAlign:'center'}}>
+          <div style={{animation:'pop 0.5s ease',display:'inline-block'}}><BoxIcon k='fridge' size={72} /></div>
+          <h1 style={{fontSize:30,fontWeight:900,margin:'8px 0 4px',background:'linear-gradient(135deg,#ff6b9d,#a78bfa)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>ホームストック</h1>
+          <p style={{color:'#aaa',fontSize:13,fontWeight:600,margin:0}}>家族みんなで在庫を管理しよう🌸</p>
+        </div>
+        <div style={{display:'flex',gap:6,marginBottom:20,background:'#f5f5f5',borderRadius:16,padding:4}}>
+          {['login','register'].map(m => (
+            <button key={m} onClick={() => {setAuthMode(m);setForm({});}} style={{flex:1,padding:'10px',borderRadius:12,border:'none',cursor:'pointer',fontWeight:800,fontSize:14,fontFamily:'inherit',transition:'all 0.2s',background:authMode===m?'#fff':'transparent',color:authMode===m?'#ff6b9d':'#aaa',boxShadow:authMode===m?'0 2px 8px rgba(0,0,0,0.1)':'none'}}>
+              {m==='login'?'🔑 ログイン':'✨ 新規登録'}
+            </button>
+          ))}
+        </div>
+        <div style={{...S.card,animation:'slideUp 0.3s ease'}}>
+          {authMode==='register' && <div style={{marginBottom:14}}><label style={S.label}>ニックネーム</label><input style={S.input} placeholder='例：田中 花子' value={form.name||''} onChange={e=>setForm(p=>({...p,name:e.target.value}))} /></div>}
+          <div style={{marginBottom:14}}><label style={S.label}>メールアドレス</label><input style={S.input} type='email' placeholder='you@example.com' value={form.email||''} onChange={e=>setForm(p=>({...p,email:e.target.value}))} /></div>
+          <div style={{marginBottom:8}}><label style={S.label}>パスワード</label><input style={S.input} type='password' placeholder='6文字以上' value={form.password||''} onChange={e=>setForm(p=>({...p,password:e.target.value}))} /></div>
+          <button className='btn-press' style={S.btn()} onClick={authMode==='login'?handleLogin:handleRegister} disabled={loading}>
+            {loading?'処理中...✨':authMode==='login'?'🔑 ログイン':'🎉 アカウント作成'}
+          </button>
+        </div>
+        <div style={{height:40}} />
+      </div>
+      {toast && <div style={S.toastEl(toast.type)}>{toast.msg}</div>}
+    </div>
+  );
+
+  if (screen === 'settings') return (
+    <div style={S.app}><style>{CSS}</style>
+      <div style={S.wrap}>
+        <div style={S.hdr}>
+          <button onClick={()=>setScreen(currentBox?'box':'home')} style={S.iconBtn('#f0f0f0')}>← 戻る</button>
+          <h2 style={{margin:0,fontSize:18,fontWeight:900}}>設定 ⚙️</h2>
+          <div style={{width:72}} />
+        </div>
+        <div style={{...S.card,marginBottom:12}}>
+          <div style={{fontWeight:800,marginBottom:8,fontSize:15}}>🤖 Gemini APIキー</div>
+          <p style={{color:'#999',fontSize:13,marginBottom:12,lineHeight:1.5}}>レシート読み取りに使用。バーコード読み取りには不要です。<br/>aistudio.google.comで無料取得できます。</p>
+          <label style={S.label}>APIキー</label>
+          <input style={S.input} type='password' placeholder='AIza...' value={geminiKey} onChange={e=>setGeminiKey(e.target.value)} />
+          <button className='btn-press' style={S.btn('#a78bfa')} onClick={()=>{save(KEYS.APIKEY,geminiKey);showToast('保存しました！✅','success');}}>💾 保存する</button>
+        </div>
+        <div style={S.card}>
+          <div style={{fontWeight:800,marginBottom:8,fontSize:15}}>👤 アカウント</div>
+          <div style={{color:'#888',fontSize:14,marginBottom:12,fontWeight:600}}>{user?.name} さん<br/><span style={{fontSize:12}}>{user?.email}</span></div>
+          <button className='btn-press' style={S.btnOutline('#ff5b79')} onClick={handleLogout}>🚪 ログアウト</button>
+        </div>
+        <div style={{height:40}} />
+      </div>
+      {toast && <div style={S.toastEl(toast.type)}>{toast.msg}</div>}
+    </div>
+  );
+
+  if (screen === 'home') return (
+    <div style={S.app}><style>{CSS}</style>
+      <div style={S.wrap}>
+        <div style={S.hdr}>
+          <div>
+            <div style={{fontSize:13,color:'#bbb',fontWeight:700}}>こんにちは👋</div>
+            <h2 style={{margin:'2px 0 0',fontSize:20,fontWeight:900}}>{user?.name}さん！</h2>
+          </div>
+          <button onClick={()=>setScreen('settings')} style={S.iconBtn('#f5f0ff')}>⚙️</button>
+        </div>
+        {Object.values(boxes).filter(b=>b.members.includes(session.userId)).length > 0 && (
+          <div style={{marginBottom:20}}>
+            <div style={{fontSize:12,fontWeight:800,color:'#bbb',textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:10}}>📋 在庫ボックス</div>
+            {Object.values(boxes).filter(b=>b.members.includes(session.userId)).map(b => {
+              const count = Object.values(items).filter(i=>i.boxId===b.id).length;
+              const foodCount = Object.values(items).filter(i=>i.boxId===b.id&&FOOD_CATS.includes(i.category)).length;
+              return (
+                <div key={b.id} className='card-hover' onClick={()=>{const s={...session,boxId:b.id};setSession(s);save(KEYS.SESSION,s);setCurrentBox(b.id);setScreen('box');}}
+                  style={{...S.card,marginBottom:10,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'space-between',transition:'transform 0.15s'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:14}}>
+                    <div style={{background:'linear-gradient(135deg,#fdf0ff,#f0f9ff)',borderRadius:16,width:60,height:60,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                      <BoxIcon k={b.icon} size={44} />
+                    </div>
+                    <div>
+                      <div style={{fontWeight:900,fontSize:16}}>{b.name}</div>
+                      <div style={{color:'#bbb',fontSize:12,fontWeight:600,marginTop:2}}>👥{b.members.length}人 · 🍱{foodCount} 📦{count-foodCount}</div>
+                    </div>
+                  </div>
+                  <div style={{fontSize:22,color:'#ddd'}}>›</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div style={{...S.cardColor('#fff5fc'),marginBottom:12,border:'2px dashed #ffd6ed'}}>
+          <div style={{fontWeight:800,marginBottom:12,fontSize:15}}>✨ 新しい在庫ボックスを作る</div>
+          <label style={S.label}>アイコンを選ぼう</label>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:8,marginBottom:14}}>
+            {BOX_ICON_KEYS.map(k=>(
+              <button key={k} onClick={()=>setForm(p=>({...p,boxIcon:k}))} title={BOX_LABELS[k]}
+                style={{background:form.boxIcon===k?'#fff0f9':'#fafafa',border:form.boxIcon===k?'2.5px solid #ff6b9d':'2.5px solid #f0f0f0',borderRadius:14,padding:'8px',cursor:'pointer',transition:'all 0.15s',transform:form.boxIcon===k?'scale(1.1)':'scale(1)'}}>
+                <BoxIcon k={k} size={44} />
+              </button>
+            ))}
+          </div>
+          <label style={S.label}>ボックス名</label>
+          <input style={S.input} placeholder='例：冷蔵庫・洗面台備品' value={form.boxName||''} onChange={e=>setForm(p=>({...p,boxName:e.target.value}))} />
+          <button className='btn-press' style={S.btn('#ff6b9d')} onClick={createBox}>🌸 作成する</button>
+        </div>
+        <div style={{...S.cardColor('#f0f4ff'),border:'2px dashed #c7d2fe'}}>
+          <div style={{fontWeight:800,marginBottom:12,fontSize:15}}>🔗 招待コードで参加</div>
+          <input style={S.input} placeholder='XX-XX-XX-XX' value={inviteInput} onChange={e=>setInviteInput(e.target.value)} />
+          <button className='btn-press' style={S.btn('#818cf8')} onClick={joinBox}>🎊 参加する</button>
+        </div>
+        <div style={{height:40}} />
+      </div>
+      {toast && <div style={S.toastEl(toast.type)}>{toast.msg}</div>}
+    </div>
+  );
+
+  if (screen === 'box') {
+    const expiredItems = boxItems.filter(i=>isExpired(i.expiry));
+    const expiringItems = boxItems.filter(i=>isExpiringSoon(i.expiry));
+    return (
+      <div style={S.app}><style>{CSS}</style>
+        <div style={S.wrap}>
+          <div style={S.hdr}>
+            <div>
+              <button onClick={()=>setScreen('home')} style={{background:'none',border:'none',color:'#bbb',cursor:'pointer',fontSize:13,padding:0,fontFamily:'inherit',fontWeight:700}}>← 戻る</button>
+              <h2 style={{margin:'2px 0 0',fontSize:18,fontWeight:900,display:'flex',alignItems:'center',gap:6}}>
+                <span style={{display:'inline-flex'}}><BoxIcon k={box?.icon} size={28} /></span>
+                {box?.name}
+              </h2>
+              <div style={{color:'#bbb',fontSize:12,fontWeight:600}}>👥{box?.members.length}人 · {boxItems.length}品</div>
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={()=>setShowInvite(!showInvite)} style={S.iconBtn('#fff0fa')}>🔗</button>
+              <button onClick={()=>setScreen('settings')} style={S.iconBtn('#f5f0ff')}>⚙️</button>
+            </div>
+          </div>
+          {showInvite && (
+            <div style={{...S.cardColor('#fff0fa'),marginBottom:14,border:'2px solid #ffd6ed',animation:'slideUp 0.2s ease'}}>
+              <div style={{fontSize:12,color:'#ff6b9d',marginBottom:8,fontWeight:800}}>🔗 招待コード</div>
+              <div style={{background:'#fff',borderRadius:14,padding:'14px',fontFamily:'monospace',fontSize:20,fontWeight:900,color:'#ff6b9d',textAlign:'center',letterSpacing:3,border:'2px dashed #ffd6ed'}}>{box?.inviteCode}</div>
+              <div style={{fontSize:12,color:'#ccc',marginTop:8,textAlign:'center',fontWeight:600}}>このコードを家族に送ってね 💌</div>
+              {box?.ownerId===session.userId && <button className='btn-press' style={S.btnOutline('#ff6b9d')} onClick={refreshCode}>🔄 コードを再発行</button>}
+            </div>
+          )}
+          {expiredItems.length > 0 && <div style={{background:'#fff0f2',border:'2px solid #fecdd3',borderRadius:16,padding:'10px 14px',marginBottom:10,fontSize:13,fontWeight:700,color:'#f43f5e'}}>⚠️ 期限切れ {expiredItems.length}品！確認してね</div>}
+          {expiringItems.length > 0 && <div style={{background:'#fffbeb',border:'2px solid #fde68a',borderRadius:16,padding:'10px 14px',marginBottom:10,fontSize:13,fontWeight:700,color:'#d97706'}}>⏳ もうすぐ期限！{expiringItems.length}品（3日以内）</div>}
+          {scanning && <div style={{background:'#f5f0ff',border:'2px solid #ddd6fe',borderRadius:16,padding:'14px',marginBottom:12,textAlign:'center',fontSize:14,fontWeight:700,color:'#7c3aed',animation:'slideUp 0.2s ease'}}>✨ {scanMsg}</div>}
+          <div style={{display:'flex',gap:6,marginBottom:12,background:'#f5f5f5',borderRadius:14,padding:4}}>
+            {[['all','🌈 すべて'],['food','🍱 食料品'],['supply','📦 備品']].map(([v,l])=>(
+              <button key={v} onClick={()=>setFilterType(v)} style={{flex:1,padding:'8px 4px',borderRadius:10,border:'none',cursor:'pointer',fontSize:12,fontWeight:800,fontFamily:'inherit',background:filterType===v?'#fff':'transparent',color:filterType===v?'#ff6b9d':'#bbb',boxShadow:filterType===v?'0 2px 8px rgba(0,0,0,0.08)':'none',transition:'all 0.2s'}}>{l}</button>
+            ))}
+          </div>
+          <div style={{display:'flex',gap:6,marginBottom:12,overflowX:'auto',paddingBottom:4}}>
+            <button onClick={()=>setFilterCat('all')} style={{whiteSpace:'nowrap',padding:'6px 12px',borderRadius:20,border:'none',cursor:'pointer',fontSize:11,fontWeight:800,fontFamily:'inherit',background:filterCat==='all'?'#ff6b9d':'#f0f0f0',color:filterCat==='all'?'#fff':'#aaa',flexShrink:0}}>すべて</button>
+            {ALL_CATS.map(cat=>(
+              <button key={cat} onClick={()=>setFilterCat(cat)} style={{whiteSpace:'nowrap',padding:'6px 12px',borderRadius:20,border:'none',cursor:'pointer',fontSize:11,fontWeight:800,fontFamily:'inherit',background:filterCat===cat?CAT_COLORS[cat]:'#f0f0f0',color:filterCat===cat?'#333':'#aaa',flexShrink:0}}>{CAT_ICONS[cat]} {cat}</button>
+            ))}
+          </div>
+          <div style={{display:'flex',gap:8,marginBottom:14,alignItems:'center'}}>
+            <span style={{fontSize:12,color:'#bbb',fontWeight:700,whiteSpace:'nowrap'}}>並び替え:</span>
+            <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{...S.input,marginTop:0,padding:'8px 12px',fontSize:12,width:'auto',fontWeight:700}}>
+              <option value='name'>名前順</option><option value='expiry'>賞味期限順</option><option value='added'>追加日順</option>
+            </select>
+          </div>
+          {filteredItems.length===0 ? (
+            <div style={{textAlign:'center',padding:'48px 0',color:'#ddd'}}>
+              <div style={{fontSize:56,marginBottom:12}}>📭</div>
+              <div style={{fontWeight:700,fontSize:15}}>在庫がありません</div>
+              <div style={{fontSize:12,marginTop:4}}>下の ＋ ボタンから追加してね！</div>
+            </div>
+          ) : filteredItems.map(item => {
+            const exp=isExpired(item.expiry),expi=isExpiringSoon(item.expiry),byUser=users[item.addedBy];
+            const isSupply = SUPPLY_CATS.includes(item.category);
+            const catColor = CAT_COLORS[item.category] || '#f0f0f0';
+            return (
+              <div key={item.id} className='card-hover' style={{...S.card,marginBottom:8,cursor:'pointer',display:'flex',alignItems:'center',gap:12,transition:'transform 0.15s',borderLeft:'4px solid ' + catColor}} onClick={()=>openEditItem(item)}>
+                <div style={{fontSize:30,flexShrink:0,background:catColor+'44',borderRadius:14,width:52,height:52,display:'flex',alignItems:'center',justifyContent:'center'}}>{CAT_ICONS[item.category]||'📦'}</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4,flexWrap:'wrap'}}>
+                    <span style={{fontWeight:800,fontSize:15,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{item.name}</span>
+                    {exp && <span className='tag' style={{background:'#fff0f2',color:'#f43f5e'}}>⚠️期限切れ</span>}
+                    {!exp&&expi && <span className='tag' style={{background:'#fffbeb',color:'#d97706'}}>⏳期限間近</span>}
+                    {isSupply && <span className='tag' style={{background:'#fff7ed',color:'#ea580c'}}>備品</span>}
+                  </div>
+                  <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+                    <span className='tag' style={{background:catColor+'33',color:'#555'}}>{item.category}</span>
+                    <span style={{color:'#999',fontSize:12,fontWeight:700}}>{item.quantity}{item.unit}</span>
+                    {item.expiry && <span style={{color:exp?'#f43f5e':expi?'#d97706':'#bbb',fontSize:11,fontWeight:700}}>📅{item.expiry}</span>}
+                    {item.purchaseDate && <span style={{color:'#bbb',fontSize:11,fontWeight:700}}>🛒{item.purchaseDate}</span>}
+                    <span style={{color:'#ddd',fontSize:11,fontWeight:600}}>by {byUser?.name||'?'}</span>
+                  </div>
+                  {item.note && <div style={{color:'#bbb',fontSize:12,marginTop:4,fontWeight:600}}>📝 {item.note}</div>}
+                </div>
+                <button onClick={e=>{e.stopPropagation();setConfirmDelete(item);}} style={{background:'#fff0f2',border:'none',color:'#f43f5e',borderRadius:12,padding:'8px 10px',cursor:'pointer',fontSize:16,flexShrink:0}}>🗑</button>
+              </div>
+            );
+          })}
+          <div style={{height:110}} />
+        </div>
+        <input ref={barcodeRef} type='file' accept='image/*' capture='environment' style={{display:'none'}} onChange={e=>{if(e.target.files[0])handleBarcode(e.target.files[0]);e.target.value='';}} />
+        <input ref={receiptRef} type='file' accept='image/*' style={{display:'none'}} onChange={e=>{if(e.target.files[0])handleReceipt(e.target.files[0]);e.target.value='';}} />
+        {showAddMenu && (
+          <div style={{position:'fixed',inset:0,zIndex:150,background:'rgba(0,0,0,0.2)'}} onClick={()=>setShowAddMenu(false)}>
+            <div style={{position:'fixed',bottom:96,right:16,display:'flex',flexDirection:'column',gap:12,alignItems:'flex-end'}} onClick={e=>e.stopPropagation()}>
+              {[
+                {label:'✏️ 手動で入力', bg:'#64748b', action:()=>{setShowAddMenu(false);setForm({purchaseDate:today()});setScreen('addItem');}},
+                {label:'🧾 レシートを読み取り', bg:'#0891b2', action:()=>receiptRef.current?.click()},
+                {label:'📷 バーコードをスキャン', bg:'#7c3aed', action:()=>barcodeRef.current?.click()},
+              ].map(({label,bg,action}) => (
+                <button key={label} className='btn-press' onClick={action}
+                  style={{background:bg,color:'#fff',border:'none',borderRadius:20,padding:'12px 20px',fontSize:14,fontWeight:800,cursor:'pointer',fontFamily:'inherit',boxShadow:'0 4px 16px ' + bg + '55',animation:'slideUp 0.2s ease',whiteSpace:'nowrap'}}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <button className='btn-press' onClick={()=>setShowAddMenu(!showAddMenu)}
+          style={{position:'fixed',bottom:24,right:24,width:64,height:64,borderRadius:'50%',background:showAddMenu?'#f43f5e':'linear-gradient(135deg,#ff6b9d,#a78bfa)',border:'none',color:'#fff',fontSize:30,cursor:'pointer',zIndex:160,display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'0 8px 24px rgba(255,107,157,0.5)',transition:'all 0.2s',transform:showAddMenu?'rotate(45deg)':'rotate(0deg)'}}>+</button>
+        {confirmDelete && (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.3)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:'0 20px'}}>
+            <div style={{...S.card,maxWidth:340,width:'100%',animation:'pop 0.3s ease',textAlign:'center'}}>
+              <div style={{fontSize:48,marginBottom:8}}>🗑️</div>
+              <div style={{fontWeight:900,fontSize:16,marginBottom:6}}>「{confirmDelete.name}」を削除する？</div>
+              <div style={{color:'#bbb',fontSize:13,marginBottom:16}}>この操作は元に戻せません</div>
+              <button className='btn-press' style={S.btn('#f43f5e')} onClick={()=>deleteItem(confirmDelete.id)}>削除する</button>
+              <button className='btn-press' style={S.btnOutline('#bbb')} onClick={()=>setConfirmDelete(null)}>キャンセル</button>
+            </div>
+          </div>
+        )}
+        {toast && <div style={S.toastEl(toast.type)}>{toast.msg}</div>}
+      </div>
+    );
+  }
+
+  if (screen === 'scanResult') return (
+    <div style={S.app}><style>{CSS}</style>
+      <div style={S.wrap}>
+        <div style={S.hdr}>
+          <button onClick={()=>{setScannedItems([]);setScreen('box');}} style={S.iconBtn('#f0f0f0')}>← キャンセル</button>
+          <h2 style={{margin:0,fontSize:18,fontWeight:900}}>📋 読み取り結果</h2>
+          <div style={{width:90}} />
+        </div>
+        <div style={{...S.cardColor('#f0fff4'),marginBottom:14,border:'2px solid #86efac',textAlign:'center'}}>
+          <div style={{fontSize:24,marginBottom:4}}>🎉</div>
+          <div style={{fontWeight:800,color:'#16a34a'}}>{scannedItems.length}品を検出しました！</div>
+          <div style={{color:'#999',fontSize:12,marginTop:2}}>確認して登録してください</div>
+        </div>
+        {scannedItems.map((item,i) => (
+          <div key={i} style={{...S.card,marginBottom:8,display:'flex',alignItems:'center',gap:12}}>
+            <div style={{fontSize:28,background:CAT_COLORS[item.category]+'44',borderRadius:12,width:48,height:48,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{CAT_ICONS[item.category]||'📦'}</div>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:800}}>{item.name}</div>
+              <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:4}}>
+                <span className='tag' style={{background:CAT_COLORS[item.category]+'33',color:'#555'}}>{item.category}</span>
+                <span style={{color:'#999',fontSize:12,fontWeight:700}}>{item.quantity}{item.unit}</span>
+                {item.purchaseDate && <span style={{color:'#bbb',fontSize:12,fontWeight:700}}>🛒{item.purchaseDate}</span>}
+              </div>
+            </div>
+            <button onClick={()=>setScannedItems(scannedItems.filter((_,j)=>j!==i))} style={{background:'#fff0f2',border:'none',color:'#f43f5e',borderRadius:10,padding:'6px 10px',cursor:'pointer',fontSize:14,flexShrink:0}}>✕</button>
+          </div>
+        ))}
+        <button className='btn-press' style={S.btn('#4ade80')} onClick={confirmAndAddScanned}>✅ {scannedItems.length}品をまとめて登録</button>
+        <button className='btn-press' style={S.btnOutline('#bbb')} onClick={()=>{setScannedItems([]);setScreen('box');}}>キャンセル</button>
+        <div style={{height:40}} />
+      </div>
+    </div>
+  );
+
+  if (screen === 'scanConfirm') return (
+    <div style={S.app}><style>{CSS}</style>
+      <div style={S.wrap}>
+        <div style={S.hdr}>
+          <button onClick={()=>{setPendingItems([]);setScreen('box');}} style={S.iconBtn('#f0f0f0')}>← キャンセル</button>
+          <h2 style={{margin:0,fontSize:18,fontWeight:900}}>🤔 カテゴリ確認</h2>
+          <div style={{width:90}} />
+        </div>
+        <div style={{...S.cardColor('#fffbeb'),marginBottom:14,border:'2px solid #fde68a'}}>
+          <div style={{fontWeight:700,color:'#d97706',fontSize:13}}>⚠️ 一部の商品のカテゴリを確認してください</div>
+        </div>
+        {pendingItems.map((item,i) => (
+          <div key={i} style={{...S.card,marginBottom:10}}>
+            <div style={{fontWeight:800,marginBottom:10,fontSize:15}}>{item.name}</div>
+            <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+              {ALL_CATS.map(cat=>(
+                <button key={cat} onClick={()=>{const ni=[...pendingItems];ni[i]={...ni[i],category:cat};setPendingItems(ni);}}
+                  style={{padding:'5px 10px',borderRadius:12,border:'none',cursor:'pointer',fontSize:11,fontWeight:800,fontFamily:'inherit',background:item.category===cat?CAT_COLORS[cat]:'#f5f5f5',color:item.category===cat?'#333':'#aaa',transition:'all 0.15s'}}>
+                  {CAT_ICONS[cat]} {cat}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+        <button className='btn-press' style={S.btn()} onClick={()=>{setScannedItems(pendingItems);setPendingItems([]);setScreen('scanResult');}}>確認完了 →</button>
+        <div style={{height:40}} />
+      </div>
+    </div>
+  );
+
+  if (screen === 'addItem' || screen === 'editItem') {
+    const isEdit = screen === 'editItem';
+    return (
+      <div style={S.app}><style>{CSS}</style>
+        <div style={S.wrap}>
+          <div style={S.hdr}>
+            <button onClick={()=>{setScreen('box');setForm({});setEditingItem(null);}} style={S.iconBtn('#f0f0f0')}>← キャンセル</button>
+            <h2 style={{margin:0,fontSize:18,fontWeight:900}}>{isEdit?'✏️ 在庫を編集':'🌸 在庫を追加'}</h2>
+            <div style={{width:90}} />
+          </div>
+          <div style={S.card}>
+            <div style={{marginBottom:14}}><label style={S.label}>品名 *</label><input style={S.input} placeholder='例：牛乳' value={form.itemName||''} onChange={e=>setForm(p=>({...p,itemName:e.target.value}))} /></div>
+            <div style={{marginBottom:14}}><label style={S.label}>カテゴリ</label>
+              <select style={S.input} value={form.category||'食料品その他'} onChange={e=>setForm(p=>({...p,category:e.target.value}))}>
+                <optgroup label='🍱 食料品'>{FOOD_CATS.map(c=><option key={c} value={c}>{CAT_ICONS[c]} {c}</option>)}</optgroup>
+                <optgroup label='📦 備品・日用品'>{SUPPLY_CATS.map(c=><option key={c} value={c}>{CAT_ICONS[c]} {c}</option>)}</optgroup>
+              </select>
+            </div>
+            <div style={{display:'flex',gap:12,marginBottom:14}}>
+              <div style={{flex:1}}><label style={S.label}>数量</label><input style={S.input} type='number' min='0' step='0.1' placeholder='1' value={form.quantity||''} onChange={e=>setForm(p=>({...p,quantity:e.target.value}))} /></div>
+              <div style={{flex:1}}><label style={S.label}>単位</label><input style={S.input} placeholder='個/本/袋' value={form.unit||''} onChange={e=>setForm(p=>({...p,unit:e.target.value}))} /></div>
+            </div>
+            <div style={{marginBottom:14}}><label style={S.label}>賞味期限</label><input style={S.input} type='date' value={form.expiry||''} onChange={e=>setForm(p=>({...p,expiry:e.target.value}))} /></div>
+            <div style={{marginBottom:14}}><label style={S.label}>購入日</label><input style={S.input} type='date' value={form.purchaseDate||''} onChange={e=>setForm(p=>({...p,purchaseDate:e.target.value}))} /></div>
+            <div style={{marginBottom:8}}><label style={S.label}>メモ</label><input style={S.input} placeholder='例：残り少ない・開封済み' value={form.note||''} onChange={e=>setForm(p=>({...p,note:e.target.value}))} /></div>
+            <button className='btn-press' style={S.btn(isEdit?'#a78bfa':'#ff6b9d')} onClick={isEdit?updateItem:addItem}>{isEdit?'✅ 更新する':'🎉 追加する'}</button>
+          </div>
+          <div style={{height:40}} />
+        </div>
+        {toast && <div style={S.toastEl(toast.type)}>{toast.msg}</div>}
+      </div>
+    );
+  }
+
+  return null;
+}
