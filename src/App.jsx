@@ -242,36 +242,42 @@ export default function App() {
           <button onClick={() => setScreen('settings')} style={S.iconBtn}>⚙️</button>
         </div>
 
-        {(expiredAll.length > 0 || expiringAll.length > 0) && (
-          <div style={{ marginBottom: 20 }}>
-            <div style={S.sectionTitle}>⚠️ 期限アラート</div>
-            {expiredAll.length > 0 && (
-              <div style={{ ...S.card, marginBottom: 8, background: '#fef2f2', border: '1px solid #fecaca' }}>
-                <div style={{ fontWeight: 700, color: danger, fontSize: 13, marginBottom: 8 }}>期限切れ {expiredAll.length}品</div>
-                {expiredAll.slice(0, 3).map(i => (
-                  <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #fecaca' }}>
-                    <span style={{ fontSize: 13, fontWeight: 500 }}>{i.name}</span>
-                    <span style={{ fontSize: 11, color: danger }}>📅 {i.expiry}・{boxes[i.boxId]?.name || '?'}</span>
-                  </div>
-                ))}
-                {expiredAll.length > 3 && <div style={{ fontSize: 11, color: danger, marginTop: 6 }}>他 {expiredAll.length - 3}品...</div>}
-              </div>
-            )}
-            {expiringAll.length > 0 && (
-              <div style={{ ...S.card, background: '#fffbeb', border: '1px solid #fde68a' }}>
-                <div style={{ fontWeight: 700, color: warn, fontSize: 13, marginBottom: 8 }}>もうすぐ期限 {expiringAll.length}品（3日以内）</div>
-                {expiringAll.slice(0, 3).map(i => (
-                  <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #fde68a' }}>
-                    <span style={{ fontSize: 13, fontWeight: 500 }}>{i.name}</span>
-                    <span style={{ fontSize: 11, color: warn }}>📅 {i.expiry}・{boxes[i.boxId]?.name || '?'}</span>
-                  </div>
-                ))}
-                {expiringAll.length > 3 && <div style={{ fontSize: 11, color: warn, marginTop: 6 }}>他 {expiringAll.length - 3}品...</div>}
-              </div>
-            )}
-          </div>
-        )}
+        {/* 期限アラート：常に表示 */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={S.sectionTitle}>⚠️ 期限アラート</div>
+          {expiredAll.length === 0 && expiringAll.length === 0 ? (
+            <div style={{ ...S.card, textAlign: 'center', padding: '16px 20px', color: textMuted, fontSize: 13 }}>期限切れ・期限間近の食材はありません</div>
+          ) : (
+            <>
+              {expiredAll.length > 0 && (
+                <div style={{ ...S.card, marginBottom: 8, background: '#fef2f2', border: '1px solid #fecaca' }}>
+                  <div style={{ fontWeight: 700, color: danger, fontSize: 13, marginBottom: 8 }}>期限切れ {expiredAll.length}品</div>
+                  {expiredAll.slice(0, 3).map(i => (
+                    <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #fecaca' }}>
+                      <span style={{ fontSize: 13, fontWeight: 500 }}>{i.name}</span>
+                      <span style={{ fontSize: 11, color: danger }}>📅 {i.expiry}・{boxes[i.boxId]?.name || '?'}</span>
+                    </div>
+                  ))}
+                  {expiredAll.length > 3 && <div style={{ fontSize: 11, color: danger, marginTop: 6 }}>他 {expiredAll.length - 3}品...</div>}
+                </div>
+              )}
+              {expiringAll.length > 0 && (
+                <div style={{ ...S.card, background: '#fffbeb', border: '1px solid #fde68a' }}>
+                  <div style={{ fontWeight: 700, color: warn, fontSize: 13, marginBottom: 8 }}>もうすぐ期限 {expiringAll.length}品（3日以内）</div>
+                  {expiringAll.slice(0, 3).map(i => (
+                    <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #fde68a' }}>
+                      <span style={{ fontSize: 13, fontWeight: 500 }}>{i.name}</span>
+                      <span style={{ fontSize: 11, color: warn }}>📅 {i.expiry}・{boxes[i.boxId]?.name || '?'}</span>
+                    </div>
+                  ))}
+                  {expiringAll.length > 3 && <div style={{ fontSize: 11, color: warn, marginTop: 6 }}>他 {expiringAll.length - 3}品...</div>}
+                </div>
+              )}
+            </>
+          )}
+        </div>
 
+        {/* 在庫切れリスト：常に表示 */}
         <div style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
             <div style={S.sectionTitle}>🛒 在庫切れリスト</div>
@@ -303,7 +309,7 @@ export default function App() {
             </div>
           )}
           {shortageItems.length === 0 ? (
-            <div style={{ ...S.card, textAlign: 'center', padding: '20px', color: textMuted, fontSize: 13 }}>在庫切れアイテムはありません 👍</div>
+            <div style={{ ...S.card, textAlign: 'center', padding: '16px 20px', color: textMuted, fontSize: 13 }}>在庫切れアイテムはありません</div>
           ) : shortageItems.map(item => (
             <div key={item.id} style={{ ...S.card, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{ flex: 1 }}>
@@ -320,6 +326,7 @@ export default function App() {
           ))}
         </div>
 
+        {/* 在庫ボックス */}
         {visibleBoxes.length > 0 && (
           <div style={{ marginBottom: 20 }}>
             <div style={S.sectionTitle}>在庫ボックス</div>
@@ -345,11 +352,13 @@ export default function App() {
           </div>
         )}
 
+        {/* 新しいボックス作成 */}
         <div style={{ ...S.card, marginBottom: 10, border: '1.5px dashed ' + border }}>
           <div style={{ fontWeight: 700, marginBottom: 16, fontSize: 15 }}>新しい在庫ボックスを作る</div>
           <BoxForm form={form} setForm={setForm} onSubmit={createBox} submitLabel='作成する' existing={null} cats={cats} catIcons={catIcons} catColors={catColors} S={S} accent={accent} textMuted={textMuted} />
         </div>
 
+        {/* 招待コード */}
         <div style={{ ...S.card, marginBottom: 10, border: '1.5px dashed ' + border }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
             <div style={{ fontWeight: 700, fontSize: 15 }}>家族を招待する</div>
