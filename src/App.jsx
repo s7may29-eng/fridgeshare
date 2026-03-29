@@ -77,7 +77,7 @@ async function analyzeReceipt(apiKey, base64Image, mimeType) {
 
 const GUIDE_STEPS = [
   { icon: '📦', title: '在庫ボックスを作ろう', desc: '冷蔵庫・棚・洗面台など、場所ごとにボックスを作って管理できます。' },
-  { icon: '👨‍👩‍👧', title: '家族を招待しよう', desc: '設定画面の招待コードを家族に送るだけ。一度で全ボックスを共有できます。' },
+  { icon: '👨‍👩‍👧', title: '家族を招待しよう', desc: 'ホーム画面の招待コードを家族に送るだけ。一度で全ボックスを共有できます。' },
   { icon: '📷', title: '3つの方法で追加', desc: 'バーコードスキャン・レシート読み取り・手動入力で簡単に在庫を登録できます。' },
   { icon: '⏰', title: '期限を管理しよう', desc: '賞味期限が近づくと自動でお知らせ。食品ロスを減らせます。' },
 ];
@@ -89,6 +89,7 @@ export default function App() {
   const [items, setItems] = useState({});
   const [session, setSession] = useState(null);
   const [currentBox, setCurrentBox] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
   const [toast, setToast] = useState(null);
   const [authMode, setAuthMode] = useState('login');
@@ -120,6 +121,10 @@ export default function App() {
     if (s?.userId) {
       setSession(s);
       if (s.boxId) setCurrentBox(s.boxId);
+      // 自分のユーザー情報をリアルタイム監視
+      onValue(ref(db, 'users/' + s.userId), snap => {
+        if (snap.val()) setCurrentUser(snap.val());
+      });
       onValue(ref(db, 'users'), snap => { if (snap.val()) setUsers(snap.val()); });
       onValue(ref(db, 'boxes'), snap => { setBoxes(snap.val() || {}); });
       onValue(ref(db, 'friends/' + s.userId), snap => { setFriends(snap.val() || {}); });
@@ -143,7 +148,9 @@ export default function App() {
     }
     const id = genId();
     const hash = await hashPassword(form.password);
-    await set(ref(db, 'users/' + id), { id, name: form.name.trim(), email: form.email.toLowerCase(), hash, inviteCode: genCode(), createdAt: Date.now() });
+    const newUser = { id, name: form.name.trim(), email: form.email.toLowerCase(), hash, inviteCode: genCode(), createdAt: Date.now() };
+    await set(ref(db, 'users/' + id), newUser);
+    setCurrentUser(newUser);
     saveSession({ userId: id, boxId: null });
     setLoading(false); setForm({});
     showToast('ようこそ、' + form.name + 'さん！', 'success');
@@ -159,7 +166,12 @@ export default function App() {
     if (!user) { setLoading(false); return showToast('メールまたはパスワードが違います', 'error'); }
     const hash = await hashPassword(form.password);
     if (hash !== user.hash) { setLoading(false); return showToast('メールまたはパスワードが違います', 'error'); }
-    if (!user.inviteCode) await update(ref(db, 'users/' + user.id), { inviteCode: genCode() });
+    if (!user.inviteCode) {
+      const code = genCode();
+      await update(ref(db, 'users/' + user.id), { inviteCode: code });
+      user.inviteCode = code;
+    }
+    setCurrentUser(user);
     setUsers(allUsers);
     saveSession({ userId: user.id, boxId: null });
     const boxSnap = await get(ref(db, 'boxes'));
@@ -171,7 +183,7 @@ export default function App() {
     setScreen('home');
   };
 
-  const handleLogout = () => { saveSession(null); setCurrentBox(null); setScreen('auth'); };
+  const handleLogout = () => { saveSession(null); setCurrentBox(null); setCurrentUser(null); setScreen('auth'); };
 
   const addFriend = async () => {
     const code = inviteInput.trim().toUpperCase();
@@ -265,7 +277,6 @@ export default function App() {
   const isExpired = (e) => e && new Date(e) < new Date();
 
   const box = currentBox ? boxes[currentBox] : null;
-  const user = session ? users[session.userId] : null;
   const boxItems = Object.values(items);
   const friendIds = Object.keys(friends);
   const visibleBoxes = Object.values(boxes).filter(b => b.ownerId === session?.userId || friendIds.includes(b.ownerId));
@@ -390,14 +401,6 @@ export default function App() {
           <div style={{width:60}} />
         </div>
         <div style={{...S.card, marginBottom:12}}>
-          <div style={{fontWeight:700, marginBottom:4, fontSize:15}}>あなたの招待コード</div>
-          <p style={{color:textMuted, fontSize:13, marginTop:4, marginBottom:12, lineHeight:1.5}}>このコードを家族に共有すると、お互いの全ボックスが見えるようになります。</p>
-          <div style={{background:'#f5f5f3', borderRadius:12, padding:'14px', fontFamily:'monospace', fontSize:22, fontWeight:700, color:accent, textAlign:'center', letterSpacing:4}}>
-            {user?.inviteCode || '----'}
-          </div>
-          <button className='pressable' style={S.btn()} onClick={()=>{navigator.clipboard.writeText(user?.inviteCode||'');showToast('招待コードをコピーしました！','success');}}>コピーする</button>
-        </div>
-        <div style={{...S.card, marginBottom:12}}>
           <div style={{fontWeight:700, marginBottom:4, fontSize:15}}>家族を追加</div>
           <p style={{color:textMuted, fontSize:13, marginTop:4, marginBottom:12, lineHeight:1.5}}>家族の招待コードを入力するとお互いのボックスを共有できます。</p>
           {Object.keys(friends).length > 0 && (
@@ -426,7 +429,7 @@ export default function App() {
         </div>
         <div style={S.card}>
           <div style={{fontWeight:700, marginBottom:4, fontSize:15}}>アカウント</div>
-          <div style={{color:textMuted, fontSize:14, margin:'8px 0 16px'}}>{user?.name} · {user?.email}</div>
+          <div style={{color:textMuted, fontSize:14, margin:'8px 0 16px'}}>{currentUser?.name} · {currentUser?.email}</div>
           <button className='pressable' style={S.btnGhost} onClick={handleLogout}>ログアウト</button>
         </div>
         <div style={{height:40}} />
@@ -441,7 +444,7 @@ export default function App() {
         <div style={S.hdr}>
           <div>
             <div style={{fontSize:13, color:textMuted, fontWeight:500}}>こんにちは</div>
-            <div style={{fontSize:20, fontWeight:700, letterSpacing:'-0.02em', marginTop:1}}>{user?.name}さん</div>
+            <div style={{fontSize:20, fontWeight:700, letterSpacing:'-0.02em', marginTop:1}}>{currentUser?.name}さん</div>
           </div>
           <button onClick={()=>setScreen('settings')} style={S.iconBtn}>⚙️</button>
         </div>
@@ -491,9 +494,14 @@ export default function App() {
           <div style={{fontWeight:700, marginBottom:8, fontSize:15}}>家族を招待する</div>
           <p style={{color:textMuted, fontSize:13, margin:'0 0 12px', lineHeight:1.5}}>このコードを家族に送ると、お互いの全ボックスを共有できます。</p>
           <div style={{background:'#f5f5f3', borderRadius:12, padding:'12px 16px', fontFamily:'monospace', fontSize:20, fontWeight:700, color:accent, textAlign:'center', letterSpacing:4, marginBottom:8}}>
-            {user?.inviteCode || '----'}
+            {currentUser?.inviteCode || '読み込み中...'}
           </div>
-          <button className='pressable' style={S.btn()} onClick={()=>{navigator.clipboard.writeText(user?.inviteCode||'');showToast('招待コードをコピーしました！','success');}}>コピーする</button>
+          <button className='pressable' style={S.btn()} onClick={()=>{
+            if (currentUser?.inviteCode) {
+              navigator.clipboard.writeText(currentUser.inviteCode);
+              showToast('招待コードをコピーしました！', 'success');
+            }
+          }}>コピーする</button>
         </div>
 
         <div style={{height:40}} />
