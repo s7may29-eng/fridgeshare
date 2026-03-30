@@ -200,4 +200,13 @@ export default function HomeScreen({
             <div style={{ color: textMuted, fontSize: 13, marginBottom: 16 }}>どのボックスに追加しますか？</div>
             <label style={S.label}>追加先のボックス</label>
             <select style={S.input} value={buyBoxId} onChange={e => setBuyBoxId(e.target.value)}>
-              {visibleBoxes.map(b =>
+              {visibleBoxes.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+            <button className='pressable' style={S.btn('#22c55e')} onClick={() => handleBought(buyingItem)}>在庫に追加する</button>
+            <button className='pressable' style={S.btnGhost} onClick={() => { setBuyingItem(null); setBuyBoxId(''); }}>キャンセル</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
