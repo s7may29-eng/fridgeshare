@@ -12,6 +12,10 @@ export default function HomeScreen({
   showToast, addShortage, removeShortage, handleBought, createBox,
   handleShortageBarcode, shortageBarcodeRef, getItemEmoji,
 }) {
+  const [showAlertAdd, setShowAlertAdd] = React.useState(false);
+  const [alertForm, setAlertForm] = React.useState({ name: '', quantity: '1', unit: '個' });
+  const alertBarcodeRef = React.useRef(null);
+
   return (
     <div style={S.app}>
       <div style={S.wrap}>
@@ -25,7 +29,33 @@ export default function HomeScreen({
 
         {/* 期限アラート */}
         <div style={{ marginBottom: 20 }}>
-          <div style={S.sectionTitle}>⚠️ 期限アラート</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <div style={S.sectionTitle}>⚠️ 期限アラート</div>
+            <button onClick={() => setShowAlertAdd(!showAlertAdd)}
+              style={{ background: 'none', border: 'none', color: accent, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+              {showAlertAdd ? '閉じる' : '＋ 追加'}
+            </button>
+          </div>
+          {showAlertAdd && (
+            <div style={{ ...S.card, marginBottom: 10, animation: 'fadeUp 0.2s ease' }}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <input style={{ ...S.input, marginTop: 0, flex: 1 }} placeholder='品名' value={alertForm.name} onChange={e => setAlertForm(p => ({ ...p, name: e.target.value }))} />
+                <input style={{ ...S.input, marginTop: 0, width: 60 }} placeholder='数量' value={alertForm.quantity} onChange={e => setAlertForm(p => ({ ...p, quantity: e.target.value }))} />
+                <input style={{ ...S.input, marginTop: 0, width: 56 }} placeholder='単位' value={alertForm.unit} onChange={e => setAlertForm(p => ({ ...p, unit: e.target.value }))} />
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className='pressable' style={{ ...S.btn(), marginTop: 0, flex: 1 }} onClick={async () => {
+                  if (!alertForm.name.trim()) return showToast('品名を入力してください', 'error');
+                  await addShortage(alertForm);
+                  setAlertForm({ name: '', quantity: '1', unit: '個' });
+                  setShowAlertAdd(false);
+                }}>在庫切れリストに追加</button>
+                <button className='pressable' onClick={() => alertBarcodeRef.current?.click()}
+                  style={{ background: accent, color: '#fff', border: 'none', borderRadius: 12, padding: '0 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', marginTop: 0 }}>📷</button>
+              </div>
+              {scanning && <div style={{ color: accent, fontSize: 12, marginTop: 8, fontWeight: 600 }}>{scanMsg}</div>}
+            </div>
+          )}
           {expiredAll.length === 0 && expiringAll.length === 0 ? (
             <div style={{ ...S.card, textAlign: 'center', padding: '16px 20px', color: textMuted, fontSize: 13 }}>期限切れ・期限間近の食材はありません</div>
           ) : (
@@ -160,6 +190,8 @@ export default function HomeScreen({
 
       <input ref={shortageBarcodeRef} type='file' accept='image/*' capture='environment' style={{ display: 'none' }}
         onChange={e => { if (e.target.files[0]) handleShortageBarcode(e.target.files[0]); e.target.value = ''; }} />
+      <input ref={alertBarcodeRef} type='file' accept='image/*' capture='environment' style={{ display: 'none' }}
+        onChange={e => { if (e.target.files[0]) handleShortageBarcode(e.target.files[0]); e.target.value = ''; }} />
 
       {buyingItem && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 20px', backdropFilter: 'blur(2px)' }}>
@@ -168,13 +200,4 @@ export default function HomeScreen({
             <div style={{ color: textMuted, fontSize: 13, marginBottom: 16 }}>どのボックスに追加しますか？</div>
             <label style={S.label}>追加先のボックス</label>
             <select style={S.input} value={buyBoxId} onChange={e => setBuyBoxId(e.target.value)}>
-              {visibleBoxes.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-            <button className='pressable' style={S.btn('#22c55e')} onClick={() => handleBought(buyingItem)}>在庫に追加する</button>
-            <button className='pressable' style={S.btnGhost} onClick={() => { setBuyingItem(null); setBuyBoxId(''); }}>キャンセル</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+              {visibleBoxes.map(b =>
