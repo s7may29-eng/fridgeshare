@@ -18,16 +18,19 @@ export default function SubScreens({
     <div style={S.app}>
       <div style={S.wrap}>
         <div style={{ paddingTop: 64, paddingBottom: 40, textAlign: 'center' }}>
-          <div style={{ display: 'inline-flex', background: accentLight, borderRadius: 20, padding: 14, marginBottom: 16 }}>
+          <div style={{ display: 'inline-flex', background: accentLight, borderRadius: 16, padding: 16, marginBottom: 18, border: '1px solid #e7e5e4' }}>
             <BoxIcon k='fridge' size={44} />
           </div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, margin: '0 0 6px', letterSpacing: '-0.04em' }}>HomeStock</h1>
-          <p style={{ color: textMuted, fontSize: 14, margin: 0 }}>家族みんなで在庫を管理</p>
+          <h1 style={{ fontSize: 34, fontWeight: 800, margin: '0 0 6px', letterSpacing: '-0.045em', display: 'flex', justifyContent: 'center', alignItems: 'baseline', gap: 1 }}>
+            <span>Home</span>
+            <span style={{ fontWeight: 400, color: textMuted }}>Stock</span>
+          </h1>
+          <p style={{ color: textMuted, fontSize: 13.5, margin: 0, letterSpacing: '0.02em', fontWeight: 500 }}>家族みんなで在庫を管理</p>
         </div>
-        <div style={{ display: 'flex', gap: 4, marginBottom: 24, background: '#f0f0ef', borderRadius: 14, padding: 3 }}>
+        <div style={{ display: 'flex', gap: 4, marginBottom: 24, background: '#f0efed', borderRadius: 10, padding: 3 }}>
           {['login', 'register'].map(m => (
             <button key={m} onClick={() => { setAuthMode(m); setForm({}); }}
-              style={{ flex: 1, padding: '10px', borderRadius: 11, border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 14, fontFamily: 'inherit', background: authMode === m ? cardBg : 'transparent', color: authMode === m ? '#1a1a1a' : textMuted, boxShadow: authMode === m ? '0 1px 4px rgba(0,0,0,0.1)' : 'none' }}>
+              style={{ flex: 1, padding: '10px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit', background: authMode === m ? cardBg : 'transparent', color: authMode === m ? '#0a0a0a' : textMuted, boxShadow: authMode === m ? '0 1px 3px rgba(0,0,0,0.08)' : 'none', letterSpacing: '-0.01em' }}>
               {m === 'login' ? 'ログイン' : '新規登録'}
             </button>
           ))}
@@ -68,7 +71,7 @@ export default function SubScreens({
           <div style={{ width: 60 }} />
         </div>
         <div style={{ ...S.card, marginBottom: 12 }}>
-          <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 15 }}>カテゴリを追加</div>
+          <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 16, letterSpacing: '-0.02em' }}>カテゴリを追加</div>
           <label style={S.label}>カテゴリ名</label>
           <input style={S.input} placeholder='例：お菓子' value={newCatName} onChange={e => setNewCatName(e.target.value)} />
           <label style={{ ...S.label, marginTop: 12 }}>アイコン</label>
@@ -90,7 +93,7 @@ export default function SubScreens({
           <button className='pressable' style={S.btn()} onClick={addCat}>追加する</button>
         </div>
         <div style={S.card}>
-          <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 15 }}>現在のカテゴリ</div>
+          <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 16, letterSpacing: '-0.02em' }}>現在のカテゴリ</div>
           {cats.map(name => (
             <div key={name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid ' + border }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -117,12 +120,12 @@ export default function SubScreens({
           <div style={{ width: 60 }} />
         </div>
         <div style={{ ...S.card, marginBottom: 12 }}>
-          <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 15 }}>カテゴリ管理</div>
+          <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 16, letterSpacing: '-0.02em' }}>カテゴリ管理</div>
           <p style={{ color: textMuted, fontSize: 13, marginTop: 4, marginBottom: 12, lineHeight: 1.5 }}>カテゴリの追加・削除ができます。</p>
           <button className='pressable' style={S.btn()} onClick={() => setScreen('catSettings')}>カテゴリを管理する</button>
         </div>
         <div style={{ ...S.card, marginBottom: 12 }}>
-          <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 15 }}>家族を追加</div>
+          <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 16, letterSpacing: '-0.02em' }}>家族を追加</div>
           <p style={{ color: textMuted, fontSize: 13, marginTop: 4, marginBottom: 12, lineHeight: 1.5 }}>家族の招待コードを入力するとお互いのボックスを共有できます。</p>
           {Object.keys(users).filter(uid => uid !== session?.userId).length > 0 && (
             <div style={{ marginBottom: 12 }}>
@@ -142,14 +145,14 @@ export default function SubScreens({
           <button className='pressable' style={S.btn()} onClick={addFriend}>追加する</button>
         </div>
         <div style={{ ...S.card, marginBottom: 12 }}>
-          <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 15 }}>Gemini APIキー</div>
+          <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 16, letterSpacing: '-0.02em' }}>Gemini APIキー</div>
           <p style={{ color: textMuted, fontSize: 13, marginBottom: 14, marginTop: 4, lineHeight: 1.5 }}>レシート読み取り・期限自動推定に使用。<br />aistudio.google.comで無料取得できます。</p>
           <label style={S.label}>APIキー</label>
           <input style={S.input} type='password' placeholder='AIza...' value={geminiKey} onChange={e => setGeminiKey(e.target.value)} />
           <button className='pressable' style={S.btn()} onClick={() => { lsSet('hs-gemini', geminiKey); showToast('保存しました！', 'success'); }}>保存する</button>
         </div>
         <div style={S.card}>
-          <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 15 }}>アカウント</div>
+          <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 16, letterSpacing: '-0.02em' }}>アカウント</div>
           <div style={{ color: textMuted, fontSize: 14, margin: '8px 0 16px' }}>{currentUser?.name} · {currentUser?.email}</div>
           <button className='pressable' style={S.btnGhost} onClick={handleLogout}>ログアウト</button>
         </div>

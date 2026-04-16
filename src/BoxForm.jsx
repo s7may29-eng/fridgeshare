@@ -10,9 +10,9 @@ export default function BoxForm({ form, setForm, onSubmit, submitLabel, existing
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
           {BOX_ICON_KEYS.map(k => (
             <button key={k} onClick={() => setForm(p => ({ ...p, boxIcon: k }))}
-              style={{ background: (form.boxIcon || existing?.icon || 'fridge') === k ? '#eef2ff' : '#f5f5f3', border: (form.boxIcon || existing?.icon || 'fridge') === k ? '1.5px solid ' + accent : '1.5px solid transparent', borderRadius: 12, padding: '8px 6px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 58 }}>
+              style={{ background: (form.boxIcon || existing?.icon || 'fridge') === k ? '#f5f5f4' : '#fafaf9', border: (form.boxIcon || existing?.icon || 'fridge') === k ? '1.5px solid ' + accent : '1px solid #e7e5e4', borderRadius: 10, padding: '10px 6px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 64 }}>
               <BoxIcon k={k} size={36} />
-              <span style={{ fontSize: 9, fontWeight: 600, color: (form.boxIcon || existing?.icon || 'fridge') === k ? accent : textMuted, textAlign: 'center' }}>{BOX_LABELS[k]}</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: (form.boxIcon || existing?.icon || 'fridge') === k ? accent : '#525252', textAlign: 'center', letterSpacing: '-0.01em', lineHeight: 1.2 }}>{BOX_LABELS[k]}</span>
             </button>
           ))}
         </div>
@@ -34,7 +34,7 @@ export default function BoxForm({ form, setForm, onSubmit, submitLabel, existing
             const enabled = ec.includes(c);
             return (
               <button key={c} onClick={() => setForm(p => ({ ...p, enabledCats: enabled ? ec.filter(x => x !== c) : [...ec, c] }))}
-                style={{ padding: '5px 10px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, fontFamily: 'inherit', background: enabled ? (catColors[c] || '#f1f5f9') : '#f0f0ef', color: enabled ? '#333' : textMuted }}>
+                style={{ padding: '7px 12px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit', background: enabled ? (catColors[c] || '#f0efed') : '#f0efed', color: enabled ? '#1f2937' : textMuted, letterSpacing: '-0.01em' }}>
                 {catIcons[c] || '📦'} {c}
               </button>
             );

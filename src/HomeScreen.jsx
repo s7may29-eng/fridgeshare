@@ -1,8 +1,9 @@
+import React from 'react';
 import BoxIcon from './BoxIcon';
 import BoxForm from './BoxForm';
 
 export default function HomeScreen({
-  S, accent, danger, warn, border, textMuted, cardBg,
+  S, accent, danger, warn, border, text, textMuted, cardBg,
   currentUser, users, boxes, session, visibleBoxes,
   expiredAll, expiringAll, shortageItems, shortageForm, setShortageForm,
   showShortageAdd, setShowShortageAdd, showCode, setShowCode,
@@ -21,18 +22,26 @@ export default function HomeScreen({
       <div style={S.wrap}>
         <div style={S.hdr}>
           <div>
-            <div style={{ fontSize: 13, color: textMuted, fontWeight: 500 }}>こんにちは</div>
-            <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em', marginTop: 1 }}>{currentUser?.name}さん</div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ width: 6, height: 20, background: 'linear-gradient(180deg, #1f2937 0%, #111827 100%)', borderRadius: 2 }} />
+              <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.03em', color: text, lineHeight: 1 }}>Home<span style={{ fontWeight: 400, color: textMuted }}>Stock</span></span>
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 500, letterSpacing: '-0.01em', marginTop: 8, color: textMuted }}>{currentUser?.name} <span style={{ fontWeight: 400 }}>さん</span></div>
           </div>
-          <button onClick={() => setScreen('settings')} style={S.iconBtn}>⚙️</button>
+          <button className='pressable' onClick={() => setScreen('settings')} style={{ ...S.iconBtn, padding: '9px 11px' }} aria-label='設定'>
+            <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round'>
+              <path d='M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z'/>
+              <circle cx='12' cy='12' r='3'/>
+            </svg>
+          </button>
         </div>
 
         {/* 期限アラート */}
         <div style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <div style={S.sectionTitle}>⚠️ 期限アラート</div>
+            <div style={S.sectionTitle}><span style={{ fontFamily: 'sans-serif' }}>{'\u26A0\uFE0E'}</span> 期限アラート</div>
             <button onClick={() => setShowAlertAdd(!showAlertAdd)}
-              style={{ background: 'none', border: 'none', color: accent, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+              style={{ background: 'none', border: 'none', color: accent, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', letterSpacing: '-0.01em' }}>
               {showAlertAdd ? '閉じる' : '＋ 追加'}
             </button>
           </div>
@@ -57,31 +66,31 @@ export default function HomeScreen({
             </div>
           )}
           {expiredAll.length === 0 && expiringAll.length === 0 ? (
-            <div style={{ ...S.card, textAlign: 'center', padding: '16px 20px', color: textMuted, fontSize: 13 }}>期限切れ・期限間近の食材はありません</div>
+            <div style={{ ...S.card, textAlign: 'center', padding: '18px 20px', color: textMuted, fontSize: 14 }}>期限切れ・期限間近の食材はありません</div>
           ) : (
             <>
               {expiredAll.length > 0 && (
                 <div style={{ ...S.card, marginBottom: 8, background: '#fef2f2', border: '1px solid #fecaca' }}>
-                  <div style={{ fontWeight: 700, color: danger, fontSize: 13, marginBottom: 8 }}>期限切れ {expiredAll.length}品</div>
+                  <div style={{ fontWeight: 700, color: danger, fontSize: 14, marginBottom: 10, letterSpacing: '-0.01em' }}>期限切れ {expiredAll.length}品</div>
                   {expiredAll.slice(0, 3).map(i => (
-                    <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #fecaca' }}>
-                      <span style={{ fontSize: 13, fontWeight: 500 }}>{getItemEmoji(i.name) || catIcons[i.category] || '📦'} {i.name}</span>
-                      <span style={{ fontSize: 11, color: danger }}>📅 {i.expiry}・{boxes[i.boxId]?.name || '?'}</span>
+                    <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #fecaca', gap: 8 }}>
+                      <span style={{ fontSize: 14, fontWeight: 500, letterSpacing: '-0.01em' }}>{getItemEmoji(i.name) || catIcons[i.category] || '📦'} {i.name}</span>
+                      <span style={{ fontSize: 12, color: danger, fontWeight: 500, whiteSpace: 'nowrap' }}>{i.expiry}・{boxes[i.boxId]?.name || '?'}</span>
                     </div>
                   ))}
-                  {expiredAll.length > 3 && <div style={{ fontSize: 11, color: danger, marginTop: 6 }}>他 {expiredAll.length - 3}品...</div>}
+                  {expiredAll.length > 3 && <div style={{ fontSize: 12, color: danger, marginTop: 8, fontWeight: 500 }}>他 {expiredAll.length - 3}品...</div>}
                 </div>
               )}
               {expiringAll.length > 0 && (
                 <div style={{ ...S.card, background: '#fffbeb', border: '1px solid #fde68a' }}>
-                  <div style={{ fontWeight: 700, color: warn, fontSize: 13, marginBottom: 8 }}>もうすぐ期限 {expiringAll.length}品（3日以内）</div>
+                  <div style={{ fontWeight: 700, color: warn, fontSize: 14, marginBottom: 10, letterSpacing: '-0.01em' }}>もうすぐ期限 {expiringAll.length}品（3日以内）</div>
                   {expiringAll.slice(0, 3).map(i => (
-                    <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #fde68a' }}>
-                      <span style={{ fontSize: 13, fontWeight: 500 }}>{getItemEmoji(i.name) || catIcons[i.category] || '📦'} {i.name}</span>
-                      <span style={{ fontSize: 11, color: warn }}>📅 {i.expiry}・{boxes[i.boxId]?.name || '?'}</span>
+                    <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #fde68a', gap: 8 }}>
+                      <span style={{ fontSize: 14, fontWeight: 500, letterSpacing: '-0.01em' }}>{getItemEmoji(i.name) || catIcons[i.category] || '📦'} {i.name}</span>
+                      <span style={{ fontSize: 12, color: warn, fontWeight: 500, whiteSpace: 'nowrap' }}>{i.expiry}・{boxes[i.boxId]?.name || '?'}</span>
                     </div>
                   ))}
-                  {expiringAll.length > 3 && <div style={{ fontSize: 11, color: warn, marginTop: 6 }}>他 {expiringAll.length - 3}品...</div>}
+                  {expiringAll.length > 3 && <div style={{ fontSize: 12, color: warn, marginTop: 8, fontWeight: 500 }}>他 {expiringAll.length - 3}品...</div>}
                 </div>
               )}
             </>
@@ -91,9 +100,9 @@ export default function HomeScreen({
         {/* 在庫切れリスト */}
         <div style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <div style={S.sectionTitle}>🛒 在庫切れリスト</div>
+            <div style={S.sectionTitle}>買い物リスト</div>
             <button onClick={() => setShowShortageAdd(!showShortageAdd)}
-              style={{ background: 'none', border: 'none', color: accent, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+              style={{ background: 'none', border: 'none', color: accent, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', letterSpacing: '-0.01em' }}>
               {showShortageAdd ? '閉じる' : '＋ 追加'}
             </button>
           </div>
@@ -118,18 +127,18 @@ export default function HomeScreen({
             </div>
           )}
           {shortageItems.length === 0 ? (
-            <div style={{ ...S.card, textAlign: 'center', padding: '16px 20px', color: textMuted, fontSize: 13 }}>在庫切れアイテムはありません</div>
+            <div style={{ ...S.card, textAlign: 'center', padding: '18px 20px', color: textMuted, fontSize: 14 }}>在庫切れアイテムはありません</div>
           ) : shortageItems.map(item => (
             <div key={item.id} style={{ ...S.card, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ fontSize: 24 }}>{getItemEmoji(item.name) || '🛒'}</div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</div>
-                <div style={{ color: textMuted, fontSize: 12 }}>{item.quantity}{item.unit}</div>
+              <div style={{ fontSize: 26 }}>{getItemEmoji(item.name) || '🛒'}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 15, letterSpacing: '-0.01em' }}>{item.name}</div>
+                <div style={{ color: textMuted, fontSize: 13, marginTop: 2 }}>{item.quantity}{item.unit}</div>
               </div>
               <button onClick={() => { setBuyingItem(item); setBuyBoxId(visibleBoxes[0]?.id || ''); }}
-                style={{ background: '#dcfce7', border: 'none', color: '#16a34a', borderRadius: 10, padding: '7px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>購入した</button>
-              <button onClick={() => removeShortage(item.id)}
-                style={{ background: '#fef2f2', border: 'none', color: danger, borderRadius: 10, padding: '7px 10px', cursor: 'pointer', fontSize: 14 }}>🗑</button>
+                style={{ background: '#dcfce7', border: 'none', color: '#15803d', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', letterSpacing: '-0.01em' }}>購入した</button>
+              <button onClick={() => removeShortage(item.id)} aria-label='削除'
+                style={{ background: '#fef2f2', border: 'none', color: danger, borderRadius: 8, padding: '8px 10px', cursor: 'pointer', fontSize: 14 }}>🗑</button>
             </div>
           ))}
         </div>
@@ -145,15 +154,15 @@ export default function HomeScreen({
                 <div key={b.id} className='pressable' onClick={() => { saveSession({ ...session, boxId: b.id }); setCurrentBox(b.id); setScreen('box'); }}
                   style={{ ...S.card, marginBottom: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                    <div style={{ background: '#f5f5f3', borderRadius: 14, width: 52, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ background: '#f5f5f4', borderRadius: 12, width: 52, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <BoxIcon k={b.icon} size={40} />
                     </div>
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: 15 }}>{b.name}</div>
-                      <div style={{ color: textMuted, fontSize: 12, marginTop: 2 }}>{isOwn ? '自分のボックス' : owner?.name + 'さんのボックス'}</div>
+                      <div style={{ fontWeight: 600, fontSize: 16, letterSpacing: '-0.01em' }}>{b.name}</div>
+                      <div style={{ color: textMuted, fontSize: 13, marginTop: 2 }}>{isOwn ? '自分のボックス' : owner?.name + 'さんのボックス'}</div>
                     </div>
                   </div>
-                  <span style={{ color: border, fontSize: 20 }}>›</span>
+                  <span style={{ color: '#d1d5db', fontSize: 22, fontWeight: 300 }}>›</span>
                 </div>
               );
             })}
@@ -161,22 +170,22 @@ export default function HomeScreen({
         )}
 
         {/* 新しいボックス作成 */}
-        <div style={{ ...S.card, marginBottom: 10, border: '1.5px dashed ' + border }}>
-          <div style={{ fontWeight: 700, marginBottom: 16, fontSize: 15 }}>新しい在庫ボックスを作る</div>
+        <div style={{ ...S.card, marginBottom: 10, border: '1px dashed ' + border }}>
+          <div style={{ ...S.sectionTitle, marginBottom: 14 }}>新しい在庫ボックスを作る</div>
           <BoxForm form={form} setForm={setForm} onSubmit={createBox} submitLabel='作成する' existing={null} cats={cats} catIcons={catIcons} catColors={catColors} S={S} accent={accent} textMuted={textMuted} />
         </div>
 
         {/* 招待コード */}
-        <div style={{ ...S.card, marginBottom: 10, border: '1.5px dashed ' + border }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-            <div style={{ fontWeight: 700, fontSize: 15 }}>家族を招待する</div>
-            <button onClick={() => setShowCode(!showCode)} style={{ background: 'none', border: 'none', color: accent, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
+        <div style={{ ...S.card, marginBottom: 10, border: '1px dashed ' + border }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ ...S.sectionTitle, marginBottom: 0 }}>家族を招待する</div>
+            <button onClick={() => setShowCode(!showCode)} style={{ background: 'none', border: 'none', color: accent, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0, letterSpacing: '-0.01em' }}>
               {showCode ? '隠す' : 'コードを表示'}
             </button>
           </div>
-          <p style={{ color: textMuted, fontSize: 13, margin: '0 0 12px', lineHeight: 1.5 }}>招待コードを家族に送ると、お互いの全ボックスを共有できます。</p>
+          <p style={{ color: textMuted, fontSize: 13, margin: '0 0 12px', lineHeight: 1.55 }}>招待コードを家族に送ると、お互いの全ボックスを共有できます。</p>
           {showCode && (
-            <div style={{ background: '#f5f5f3', borderRadius: 12, padding: '12px 16px', fontFamily: 'monospace', fontSize: 20, fontWeight: 700, color: accent, textAlign: 'center', letterSpacing: 4, marginBottom: 8, animation: 'fadeUp 0.2s ease' }}>
+            <div style={{ background: '#f5f5f4', borderRadius: 10, padding: '14px 16px', fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 20, fontWeight: 700, color: accent, textAlign: 'center', letterSpacing: 3, marginBottom: 8, animation: 'fadeUp 0.2s ease' }}>
               {currentUser?.inviteCode || '読み込み中...'}
             </div>
           )}
