@@ -1,20 +1,53 @@
+import { ref, get, set, serverTimestamp } from 'firebase/database';
+import { db } from './firebase';
+
+// 1) 共有DB (barcodes/{JAN}) を優先。4〜5 家族の登録がそのまま他家庭の
+//    辞書になる。無ければ Open Food Facts（海外品には有効、国内品は弱い）
+//    を試す。どちらも無ければ null。
 export async function lookupBarcode(barcode) {
-  const res = await fetch('https://world.openfoodfacts.org/api/v0/product/' + barcode + '.json');
-  if (!res.ok) throw new Error('network error');
-  const data = await res.json();
-  if (data.status !== 1) return null;
-  const p = data.product;
-  const name = p.product_name_ja || p.product_name || p.generic_name || null;
-  if (!name) return null;
-  const cats = (p.categories_tags || []).join(' ');
-  let category = '食料品その他';
-  if (cats.includes('beverages') || cats.includes('drinks') || cats.includes('water')) category = '飲み物';
-  else if (cats.includes('dairy') || cats.includes('milk') || cats.includes('cheese') || cats.includes('yogurt')) category = '乳製品';
-  else if (cats.includes('meat') || cats.includes('fish') || cats.includes('seafood')) category = '肉・魚';
-  else if (cats.includes('frozen')) category = '冷凍食品';
-  else if (cats.includes('vegetables') || cats.includes('fruits')) category = '野菜・果物';
-  else if (cats.includes('sauce') || cats.includes('condiment') || cats.includes('spice')) category = '調味料';
-  return { name: name.trim(), category, quantity: '1', unit: '個' };
+  if (!barcode) return null;
+  try {
+    const snap = await get(ref(db, 'barcodes/' + barcode));
+    if (snap.exists()) {
+      const v = snap.val();
+      if (v?.name) return { name: v.name, category: v.category || '食料品その他', quantity: v.quantity || '1', unit: v.unit || '個', fromSharedDb: true };
+    }
+  } catch (e) { console.warn('shared barcode DB lookup failed:', e); }
+
+  try {
+    const res = await fetch('https://world.openfoodfacts.org/api/v0/product/' + barcode + '.json');
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.status !== 1) return null;
+    const p = data.product;
+    const name = p.product_name_ja || p.product_name || p.generic_name || null;
+    if (!name) return null;
+    const cats = (p.categories_tags || []).join(' ');
+    let category = '食料品その他';
+    if (cats.includes('beverages') || cats.includes('drinks') || cats.includes('water')) category = '飲み物';
+    else if (cats.includes('dairy') || cats.includes('milk') || cats.includes('cheese') || cats.includes('yogurt')) category = '乳製品';
+    else if (cats.includes('meat') || cats.includes('fish') || cats.includes('seafood')) category = '肉・魚';
+    else if (cats.includes('frozen')) category = '冷凍食品';
+    else if (cats.includes('vegetables') || cats.includes('fruits')) category = '野菜・果物';
+    else if (cats.includes('sauce') || cats.includes('condiment') || cats.includes('spice')) category = '調味料';
+    return { name: name.trim(), category, quantity: '1', unit: '個', fromSharedDb: false };
+  } catch (e) { console.warn('open food facts lookup failed:', e); return null; }
+}
+
+// ユーザーが手動登録（もしくは補正）した内容を共有 DB に upsert。
+// これにより次回以降、同じバーコードをスキャンした全家族に候補が出る。
+export async function saveBarcodeEntry(barcode, entry, userId) {
+  if (!barcode || !entry?.name) return;
+  try {
+    await set(ref(db, 'barcodes/' + barcode), {
+      name: entry.name,
+      category: entry.category || '食料品その他',
+      quantity: entry.quantity || '1',
+      unit: entry.unit || '個',
+      updatedBy: userId || null,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (e) { console.warn('shared barcode DB save failed:', e); }
 }
 
 const GEMINI_MODEL = 'gemini-2.5-flash';

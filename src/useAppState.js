@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { db, authReady } from './firebase';
 import { ref, set, get, onValue, update, remove } from 'firebase/database';
 import { genId, genCode, today, hashPassword, lsGet, lsSet } from './utils';
-import { lookupBarcode, analyzeReceipt, estimateExpiry } from './api';
+import { lookupBarcode, analyzeReceipt, estimateExpiry, saveBarcodeEntry } from './api';
 
 async function getDetector(formats) {
   let Detector = window.BarcodeDetector;
@@ -291,27 +291,33 @@ export function useAppState() {
     if (!form.itemName?.trim()) return showToast('品名を入力してください', 'error');
     const id = genId();
     const box = currentBox ? boxes[currentBox] : null;
+    const category = form.category || box?.defaultCat || cats[0] || '食料品その他';
+    const name = form.itemName.trim();
+    const quantity = form.quantity || '1';
+    const unit = form.unit || '';
     await set(ref(db, 'items/' + currentBox + '/' + id), {
-      id, boxId: currentBox, name: form.itemName.trim(),
-      category: form.category || box?.defaultCat || cats[0] || '食料品その他',
-      quantity: form.quantity || '1', unit: form.unit || '',
+      id, boxId: currentBox, name, category, quantity, unit,
       expiry: form.expiry || '', purchaseDate: form.purchaseDate || '',
       note: form.note || '', addedBy: session.userId,
       addedAt: Date.now(), updatedAt: Date.now()
     });
+    if (form._jan) saveBarcodeEntry(form._jan, { name, category, quantity, unit }, session.userId);
     setForm({}); showToast('追加しました！', 'success'); setScreen('box');
   };
 
   const updateItem = async () => {
     if (!form.itemName?.trim()) return showToast('品名を入力してください', 'error');
     const box = currentBox ? boxes[currentBox] : null;
+    const category = form.category || box?.defaultCat || cats[0] || '食料品その他';
+    const name = form.itemName.trim();
+    const quantity = form.quantity || '1';
+    const unit = form.unit || '';
     await update(ref(db, 'items/' + currentBox + '/' + editingItem.id), {
-      name: form.itemName.trim(),
-      category: form.category || box?.defaultCat || cats[0] || '食料品その他',
-      quantity: form.quantity || '1', unit: form.unit || '',
+      name, category, quantity, unit,
       expiry: form.expiry || '', purchaseDate: form.purchaseDate || '',
       note: form.note || '', updatedAt: Date.now()
     });
+    if (form._jan) saveBarcodeEntry(form._jan, { name, category, quantity, unit }, session.userId);
     setEditingItem(null); setForm({});
     showToast('更新しました！', 'success'); setScreen('box');
   };
@@ -345,13 +351,19 @@ export function useAppState() {
       const bitmap = await createImageBitmap(file);
       const codes = await detector.detect(bitmap);
       if (!codes.length) { showToast('バーコードが読み取れませんでした', 'error'); setScanning(false); return; }
+      const jan = codes[0].rawValue;
       setScanMsg('商品情報を検索中...');
-      const product = await lookupBarcode(codes[0].rawValue);
+      const product = await lookupBarcode(jan);
       setScanning(false);
       const box = currentBox ? boxes[currentBox] : null;
-      if (!product) { showToast('DBに商品が見つかりませんでした (' + codes[0].rawValue + ')', 'error'); setForm({ purchaseDate: today(), category: box?.defaultCat || cats[0] }); setScreen('addItem'); return; }
-      setForm({ itemName: product.name, category: product.category, quantity: product.quantity, unit: product.unit, purchaseDate: today() });
-      setScreen('addItem'); showToast('商品情報を取得しました！', 'success');
+      if (!product) {
+        showToast('商品が見つかりませんでした。手動で入力すると次回以降候補に出ます', 'info');
+        setForm({ purchaseDate: today(), category: box?.defaultCat || cats[0], _jan: jan });
+        setScreen('addItem'); return;
+      }
+      setForm({ itemName: product.name, category: product.category, quantity: product.quantity, unit: product.unit, purchaseDate: today(), _jan: jan });
+      setScreen('addItem');
+      showToast(product.fromSharedDb ? '共有DBから取得しました' : '商品情報を取得しました！', 'success');
     } catch (err) {
       console.error('barcode error:', err);
       setScanning(false);
@@ -386,7 +398,7 @@ export function useAppState() {
       setScanMsg('商品情報を検索中...');
       const product = await lookupBarcode(codes[0].rawValue);
       setScanning(false);
-      if (!product) { showToast('DBに商品が見つかりませんでした (' + codes[0].rawValue + ')', 'error'); return; }
+      if (!product) { showToast('商品が見つかりませんでした。一度在庫登録すると次回以降候補に出ます', 'info'); return; }
       await addShortage(product);
     } catch (err) {
       console.error('barcode error:', err);
