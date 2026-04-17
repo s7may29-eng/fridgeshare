@@ -17,35 +17,53 @@ export async function lookupBarcode(barcode) {
   return { name: name.trim(), category, quantity: '1', unit: '個' };
 }
 
+const GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent';
+
+function extractJSONArray(text) {
+  if (!text) return null;
+  try { const v = JSON.parse(text); if (Array.isArray(v)) return v; } catch (_) {}
+  const stripped = text.replace(/```(?:json)?\s*/gi, '').replace(/```/g, '').trim();
+  try { const v = JSON.parse(stripped); if (Array.isArray(v)) return v; } catch (_) {}
+  const m = stripped.match(/\[[\s\S]*\]/);
+  if (m) { try { return JSON.parse(m[0]); } catch (_) {} }
+  return null;
+}
+
 export async function analyzeReceipt(apiKey, base64Image, mimeType) {
-  const prompt = 'このレシート画像から購入した商品を全て抽出してください。購入日も読み取れる場合はYYYY-MM-DD形式で。JSON配列のみ返してください。余計なテキスト不要。[{"name":"商品名","quantity":"数量(数字のみ)","unit":"単位(個/本/袋/ml/g等、不明なら個)","purchaseDate":"YYYY-MM-DD または空文字","category":"カテゴリ名"}]。読み取れない場合は[]。';
-  const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + apiKey, {
+  const prompt = 'このレシート画像から購入した商品を全て抽出してください。購入日も読み取れる場合はYYYY-MM-DD形式で。以下のJSON配列のみ返してください:\n[{"name":"商品名","quantity":"数量(数字のみ)","unit":"単位(個/本/袋/ml/g等、不明なら個)","purchaseDate":"YYYY-MM-DD または空文字","category":"カテゴリ名"}]\n商品が読み取れない場合は空配列 [] を返してください。';
+  const res = await fetch(GEMINI_ENDPOINT + '?key=' + apiKey, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64Image } }] }] })
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64Image } }] }],
+      generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
+    }),
   });
-  if (!res.ok) throw new Error('API error: ' + res.status);
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    let msg = 'Gemini API error ' + res.status;
+    try { const j = JSON.parse(errText); if (j?.error?.message) msg += ': ' + j.error.message; } catch (_) { if (errText) msg += ': ' + errText.slice(0, 160); }
+    throw new Error(msg);
+  }
   const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
-  return JSON.parse(text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const arr = extractJSONArray(text);
+  if (!arr) throw new Error('レスポンスを解析できませんでした');
+  return arr;
 }
 
 export async function estimateExpiry(apiKey, itemName, category) {
   if (!apiKey || !itemName) return null;
-  const prompt = `食品・日用品の賞味期限・消費期限の目安を教えてください。
-品名：${itemName}
-カテゴリ：${category || ''}
-購入日から何日後が目安か、数字だけ返してください。
-例：3
-わからない場合や日用品など期限がないものは0を返してください。`;
+  const prompt = `食品・日用品の賞味期限・消費期限の目安を教えてください。\n品名：${itemName}\nカテゴリ：${category || ''}\n購入日から何日後が目安か、数字だけ返してください（例: 3）。期限がない/不明は 0。`;
   try {
-    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + apiKey, {
+    const res = await fetch(GEMINI_ENDPOINT + '?key=' + apiKey, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0 } }),
     });
     if (!res.ok) return null;
     const data = await res.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '0';
-    const days = parseInt(text);
+    const text = (data.candidates?.[0]?.content?.parts?.[0]?.text || '0').trim();
+    const days = parseInt(text.match(/\d+/)?.[0] || '0', 10);
     if (!days || days <= 0) return null;
     const d = new Date();
     d.setDate(d.getDate() + days);

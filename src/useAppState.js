@@ -1,8 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
-import { db } from './firebase';
+import { db, authReady } from './firebase';
 import { ref, set, get, onValue, update, remove } from 'firebase/database';
 import { genId, genCode, today, hashPassword, lsGet, lsSet } from './utils';
 import { lookupBarcode, analyzeReceipt, estimateExpiry } from './api';
+
+async function getDetector(formats) {
+  let Detector = window.BarcodeDetector;
+  if (!Detector) {
+    const mod = await import('barcode-detector/pure');
+    Detector = mod.BarcodeDetector;
+  }
+  return new Detector({ formats });
+}
 import { DEFAULT_ALL_CATS, DEFAULT_CAT_ICONS, DEFAULT_CAT_COLORS, BOX_DEFAULT_CATS } from './constants';
 
 export function useAppState() {
@@ -109,25 +118,31 @@ export function useAppState() {
   };
 
   useEffect(() => {
-    const s = lsGet('hs-session', null);
-    const k = lsGet('hs-gemini', '') || lsGet('fs-gemini-key', '');
-    setGeminiKey(k);
-    if (s?.userId) {
-      setSession(s);
-      setCurrentBox(null);
-      onValue(ref(db, 'users/' + s.userId), snap => { if (snap.val()) setCurrentUser(snap.val()); });
-      onValue(ref(db, 'users'), snap => { if (snap.val()) setUsers(snap.val()); });
-      onValue(ref(db, 'boxes'), snap => {
-        const data = snap.val() || {};
-        setBoxes(data);
-        migrateBoxes(data);
-      });
-      onValue(ref(db, 'friends/' + s.userId), snap => { setFriends(snap.val() || {}); });
-      onValue(ref(db, 'userCats/' + s.userId), snap => { setUserCats(snap.val() || null); });
-      onValue(ref(db, 'shortageList/' + s.userId), snap => { setShortageList(snap.val() || {}); });
-      onValue(ref(db, 'items'), snap => { setAllItems(snap.val() || {}); });
-      setScreen('home');
-    } else setScreen('auth');
+    let cancelled = false;
+    (async () => {
+      await authReady;
+      if (cancelled) return;
+      const s = lsGet('hs-session', null);
+      const k = lsGet('hs-gemini', '') || lsGet('fs-gemini-key', '');
+      setGeminiKey(k);
+      if (s?.userId) {
+        setSession(s);
+        setCurrentBox(null);
+        onValue(ref(db, 'users/' + s.userId), snap => { if (snap.val()) setCurrentUser(snap.val()); });
+        onValue(ref(db, 'users'), snap => { if (snap.val()) setUsers(snap.val()); });
+        onValue(ref(db, 'boxes'), snap => {
+          const data = snap.val() || {};
+          setBoxes(data);
+          migrateBoxes(data);
+        });
+        onValue(ref(db, 'friends/' + s.userId), snap => { setFriends(snap.val() || {}); });
+        onValue(ref(db, 'userCats/' + s.userId), snap => { setUserCats(snap.val() || null); });
+        onValue(ref(db, 'shortageList/' + s.userId), snap => { setShortageList(snap.val() || {}); });
+        onValue(ref(db, 'items'), snap => { setAllItems(snap.val() || {}); });
+        setScreen('home');
+      } else setScreen('auth');
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -326,19 +341,22 @@ export function useAppState() {
   const handleBarcode = async (file) => {
     setShowAddMenu(false); setScanning(true); setScanMsg('バーコードを読み取り中...');
     try {
-      if ('BarcodeDetector' in window) {
-        const detector = new window.BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e'] });
-        const codes = await detector.detect(await createImageBitmap(file));
-        if (!codes.length) { showToast('バーコードが読み取れませんでした', 'error'); setScanning(false); return; }
-        setScanMsg('商品情報を検索中...');
-        const product = await lookupBarcode(codes[0].rawValue);
-        setScanning(false);
-        const box = currentBox ? boxes[currentBox] : null;
-        if (!product) { showToast('DBに商品が見つかりませんでした', 'error'); setForm({ purchaseDate: today(), category: box?.defaultCat || cats[0] }); setScreen('addItem'); return; }
-        setForm({ itemName: product.name, category: product.category, quantity: product.quantity, unit: product.unit, purchaseDate: today() });
-        setScreen('addItem'); showToast('商品情報を取得しました！', 'success');
-      } else { setScanning(false); showToast('このブラウザはバーコード非対応です', 'error'); setForm({ purchaseDate: today() }); setScreen('addItem'); }
-    } catch { setScanning(false); showToast('読み取りに失敗しました', 'error'); }
+      const detector = await getDetector(['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf']);
+      const bitmap = await createImageBitmap(file);
+      const codes = await detector.detect(bitmap);
+      if (!codes.length) { showToast('バーコードが読み取れませんでした', 'error'); setScanning(false); return; }
+      setScanMsg('商品情報を検索中...');
+      const product = await lookupBarcode(codes[0].rawValue);
+      setScanning(false);
+      const box = currentBox ? boxes[currentBox] : null;
+      if (!product) { showToast('DBに商品が見つかりませんでした (' + codes[0].rawValue + ')', 'error'); setForm({ purchaseDate: today(), category: box?.defaultCat || cats[0] }); setScreen('addItem'); return; }
+      setForm({ itemName: product.name, category: product.category, quantity: product.quantity, unit: product.unit, purchaseDate: today() });
+      setScreen('addItem'); showToast('商品情報を取得しました！', 'success');
+    } catch (err) {
+      console.error('barcode error:', err);
+      setScanning(false);
+      showToast('読み取りに失敗: ' + (err?.message || '不明なエラー'), 'error');
+    }
   };
 
   const handleReceipt = async (file) => {
@@ -348,27 +366,33 @@ export function useAppState() {
     try {
       const base64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
       const results = await analyzeReceipt(geminiKey, base64, file.type);
-      if (!results.length) { showToast('商品を読み取れませんでした', 'error'); setScanning(false); return; }
+      if (!Array.isArray(results) || !results.length) { showToast('商品を読み取れませんでした', 'error'); setScanning(false); return; }
       const box = currentBox ? boxes[currentBox] : null;
       setScannedItems(results.map(i => ({ ...i, category: cats.includes(i.category) ? i.category : (box?.defaultCat || cats[0]) })));
       setScanning(false); setScreen('scanResult');
-    } catch { showToast('読み取りに失敗しました', 'error'); setScanning(false); }
+    } catch (err) {
+      console.error('receipt error:', err);
+      setScanning(false);
+      showToast('読み取りに失敗: ' + (err?.message || '不明なエラー'), 'error');
+    }
   };
 
   const handleShortageBarcode = async (file) => {
     setScanning(true); setScanMsg('バーコードを読み取り中...');
     try {
-      if ('BarcodeDetector' in window) {
-        const detector = new window.BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e'] });
-        const codes = await detector.detect(await createImageBitmap(file));
-        if (!codes.length) { showToast('バーコードが読み取れませんでした', 'error'); setScanning(false); return; }
-        setScanMsg('商品情報を検索中...');
-        const product = await lookupBarcode(codes[0].rawValue);
-        setScanning(false);
-        if (!product) { showToast('DBに商品が見つかりませんでした', 'error'); return; }
-        await addShortage(product);
-      } else { setScanning(false); showToast('このブラウザはバーコード非対応です', 'error'); }
-    } catch { setScanning(false); showToast('読み取りに失敗しました', 'error'); }
+      const detector = await getDetector(['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf']);
+      const codes = await detector.detect(await createImageBitmap(file));
+      if (!codes.length) { showToast('バーコードが読み取れませんでした', 'error'); setScanning(false); return; }
+      setScanMsg('商品情報を検索中...');
+      const product = await lookupBarcode(codes[0].rawValue);
+      setScanning(false);
+      if (!product) { showToast('DBに商品が見つかりませんでした (' + codes[0].rawValue + ')', 'error'); return; }
+      await addShortage(product);
+    } catch (err) {
+      console.error('barcode error:', err);
+      setScanning(false);
+      showToast('読み取りに失敗: ' + (err?.message || '不明なエラー'), 'error');
+    }
   };
 
   const confirmAndAddScanned = async () => {
