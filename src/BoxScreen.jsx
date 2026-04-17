@@ -156,6 +156,7 @@ export default function BoxScreen({
           </div>
         </div>
 
+        <div style={{ height: 8 }} />
         {expiredItems.length > 0 && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '11px 14px', marginBottom: 10, fontSize: 14, fontWeight: 600, color: danger, letterSpacing: '-0.01em' }}>期限切れ {expiredItems.length} 品</div>}
         {expiringItems.length > 0 && <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '11px 14px', marginBottom: 10, fontSize: 14, fontWeight: 600, color: warn, letterSpacing: '-0.01em' }}>もうすぐ期限 {expiringItems.length} 品</div>}
         {scanning && <div style={{ background: '#f5f5f4', border: '1px solid ' + border, borderRadius: 10, padding: '12px 14px', marginBottom: 12, fontSize: 13, fontWeight: 600, color: accent }}>{scanMsg}</div>}

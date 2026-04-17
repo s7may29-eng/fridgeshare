@@ -53,6 +53,34 @@ export async function saveBarcodeEntry(barcode, entry, userId) {
 const GEMINI_MODEL = 'gemini-2.5-flash';
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent';
 
+// Gemini を使ってバーコード画像から JAN コードを読み取る。
+// BarcodeDetector 非対応ブラウザ (iOS Safari 等) のフォールバック。
+export async function readBarcodeWithGemini(apiKey, file) {
+  if (!apiKey) return null;
+  const base64 = await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result.split(',')[1]);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+  const res = await fetch(GEMINI_ENDPOINT + '?key=' + apiKey, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [
+        { text: 'この画像に写っているバーコード(JAN/EAN/UPC)の番号を読み取ってください。数字のみを返してください。複数ある場合は最初の1つだけ。読み取れない場合は空文字を返してください。' },
+        { inline_data: { mime_type: file.type || 'image/jpeg', data: base64 } },
+      ] }],
+      generationConfig: { temperature: 0 },
+    }),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const text = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+  const match = text.match(/\d{8,14}/);
+  return match ? match[0] : null;
+}
+
 function extractJSONArray(text) {
   if (!text) return null;
   try { const v = JSON.parse(text); if (Array.isArray(v)) return v; } catch (_) {}

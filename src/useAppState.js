@@ -2,15 +2,20 @@ import { useState, useEffect, useRef } from 'react';
 import { db, authReady } from './firebase';
 import { ref, set, get, onValue, update, remove } from 'firebase/database';
 import { genId, genCode, today, hashPassword, lsGet, lsSet } from './utils';
-import { lookupBarcode, analyzeReceipt, estimateExpiry, saveBarcodeEntry } from './api';
+import { lookupBarcode, analyzeReceipt, estimateExpiry, saveBarcodeEntry, readBarcodeWithGemini } from './api';
 
-async function getDetector(formats) {
-  let Detector = window.BarcodeDetector;
-  if (!Detector) {
-    const mod = await import('barcode-detector/pure');
-    Detector = mod.BarcodeDetector;
+async function detectBarcode(file) {
+  // 1) ネイティブ BarcodeDetector (Chrome / Android) — 高速、API キー不要
+  if ('BarcodeDetector' in window) {
+    try {
+      const detector = new window.BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf'] });
+      const bitmap = await createImageBitmap(file);
+      const codes = await detector.detect(bitmap);
+      if (codes.length) return codes[0].rawValue;
+    } catch (e) { console.warn('native BarcodeDetector failed:', e); }
   }
-  return new Detector({ formats });
+  // 2) ネイティブ非対応 or 読取失敗 → null を返し、呼び出し側で Gemini フォールバック
+  return null;
 }
 import { DEFAULT_ALL_CATS, DEFAULT_CAT_ICONS, DEFAULT_CAT_COLORS, BOX_DEFAULT_CATS } from './constants';
 
@@ -347,17 +352,24 @@ export function useAppState() {
   const handleBarcode = async (file) => {
     setShowAddMenu(false); setScanning(true); setScanMsg('バーコードを読み取り中...');
     try {
-      const detector = await getDetector(['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf']);
-      const bitmap = await createImageBitmap(file);
-      const codes = await detector.detect(bitmap);
-      if (!codes.length) { showToast('バーコードが読み取れませんでした', 'error'); setScanning(false); return; }
-      const jan = codes[0].rawValue;
+      let jan = await detectBarcode(file);
+      if (!jan && geminiKey) {
+        setScanMsg('AIでバーコードを解析中...');
+        jan = await readBarcodeWithGemini(geminiKey, file);
+      }
+      if (!jan) {
+        setScanning(false);
+        showToast(geminiKey ? 'バーコードを認識できませんでした' : '設定からGemini APIキーを入力するとAI読取が使えます', 'error');
+        const box = currentBox ? boxes[currentBox] : null;
+        setForm({ purchaseDate: today(), category: box?.defaultCat || cats[0] });
+        setScreen('addItem'); return;
+      }
       setScanMsg('商品情報を検索中...');
       const product = await lookupBarcode(jan);
       setScanning(false);
       const box = currentBox ? boxes[currentBox] : null;
       if (!product) {
-        showToast('商品が見つかりませんでした。手動で入力すると次回以降候補に出ます', 'info');
+        showToast('商品が見つかりませんでした。手動入力すると次回以降候補に出ます', 'info');
         setForm({ purchaseDate: today(), category: box?.defaultCat || cats[0], _jan: jan });
         setScreen('addItem'); return;
       }
@@ -392,13 +404,16 @@ export function useAppState() {
   const handleShortageBarcode = async (file) => {
     setScanning(true); setScanMsg('バーコードを読み取り中...');
     try {
-      const detector = await getDetector(['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf']);
-      const codes = await detector.detect(await createImageBitmap(file));
-      if (!codes.length) { showToast('バーコードが読み取れませんでした', 'error'); setScanning(false); return; }
+      let jan = await detectBarcode(file);
+      if (!jan && geminiKey) {
+        setScanMsg('AIでバーコードを解析中...');
+        jan = await readBarcodeWithGemini(geminiKey, file);
+      }
+      if (!jan) { showToast(geminiKey ? 'バーコードを認識できませんでした' : 'Gemini APIキーを設定するとAI読取が使えます', 'error'); setScanning(false); return; }
       setScanMsg('商品情報を検索中...');
-      const product = await lookupBarcode(codes[0].rawValue);
+      const product = await lookupBarcode(jan);
       setScanning(false);
-      if (!product) { showToast('商品が見つかりませんでした。一度在庫登録すると次回以降候補に出ます', 'info'); return; }
+      if (!product) { showToast('商品が見つかりませんでした。一度在庫登録すると次回候補に出ます', 'info'); return; }
       await addShortage(product);
     } catch (err) {
       console.error('barcode error:', err);
