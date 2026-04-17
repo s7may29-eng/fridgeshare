@@ -133,8 +133,8 @@ export default function BoxScreen({
       <div style={S.wrap}>
         <div style={S.hdr}>
           <div>
-            <button onClick={() => setScreen('home')} style={{ background: 'none', border: 'none', color: textMuted, cursor: 'pointer', fontSize: 13, padding: 0, fontFamily: 'inherit', fontWeight: 500, letterSpacing: '-0.01em' }}>← 戻る</button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            <button onClick={() => setScreen('home')} style={{ background: 'none', border: 'none', color: textMuted, cursor: 'pointer', fontSize: 14, padding: '2px 0', fontFamily: 'inherit', fontWeight: 500, letterSpacing: '-0.01em' }}>← 戻る</button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
               <BoxIcon k={box?.icon} size={26} />
               <span style={{ fontWeight: 700, fontSize: 19, letterSpacing: '-0.02em' }}>{box?.name}</span>
             </div>
