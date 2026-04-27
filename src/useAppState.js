@@ -122,6 +122,7 @@ export function useAppState() {
     }
   };
 
+  // 初回マウント: 匿名認証→localStorageからセッション復元→画面決定のみ
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -133,25 +134,38 @@ export function useAppState() {
       if (s?.userId) {
         setSession(s);
         setCurrentBox(null);
-        onValue(ref(db, 'users/' + s.userId), snap => { if (snap.val()) setCurrentUser(snap.val()); });
-        onValue(ref(db, 'users'), snap => { if (snap.val()) setUsers(snap.val()); });
-        onValue(ref(db, 'boxes'), snap => {
-          const data = snap.val() || {};
-          setBoxes(data);
-          migrateBoxes(data);
-        });
-        onValue(ref(db, 'friends/' + s.userId), snap => { setFriends(snap.val() || {}); });
-        onValue(ref(db, 'userCats/' + s.userId), snap => { setUserCats(snap.val() || null); });
-        onValue(ref(db, 'shortageList/' + s.userId), snap => { setShortageList(snap.val() || {}); });
-        onValue(ref(db, 'items'), snap => { setAllItems(snap.val() || {}); });
         setScreen('home');
       } else setScreen('auth');
     })();
     return () => { cancelled = true; };
   }, []);
 
+  // セッション依存のリアルタイム購読。ログイン/新規登録直後や別アカウント切り替え時にも
+  // 必ず張り直されるよう session.userId を依存に含める。これが無いと家族のボックス・在庫が
+  // realtime で反映されず、再読み込みするまで共有が見えない不具合になる。
   useEffect(() => {
-    if (currentBox) onValue(ref(db, 'items/' + currentBox), snap => { setItems(snap.val() || {}); });
+    const uid = session?.userId;
+    if (!uid) return;
+    const unsubs = [
+      onValue(ref(db, 'users/' + uid), snap => { if (snap.val()) setCurrentUser(snap.val()); }),
+      onValue(ref(db, 'users'), snap => { if (snap.val()) setUsers(snap.val()); }),
+      onValue(ref(db, 'boxes'), snap => {
+        const data = snap.val() || {};
+        setBoxes(data);
+        migrateBoxes(data);
+      }),
+      onValue(ref(db, 'friends/' + uid), snap => { setFriends(snap.val() || {}); }),
+      onValue(ref(db, 'userCats/' + uid), snap => { setUserCats(snap.val() || null); }),
+      onValue(ref(db, 'shortageList/' + uid), snap => { setShortageList(snap.val() || {}); }),
+      onValue(ref(db, 'items'), snap => { setAllItems(snap.val() || {}); }),
+    ];
+    return () => { unsubs.forEach(u => { try { u(); } catch (_) {} }); };
+  }, [session?.userId]);
+
+  useEffect(() => {
+    if (!currentBox) return;
+    const unsub = onValue(ref(db, 'items/' + currentBox), snap => { setItems(snap.val() || {}); });
+    return () => { try { unsub(); } catch (_) {} };
   }, [currentBox]);
 
   const saveCats = async (newCats) => {
