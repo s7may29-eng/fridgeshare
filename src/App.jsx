@@ -80,7 +80,7 @@ export default function App() {
   if (screen === 'loading') return (
     <div style={{ ...S.app, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <style>{CSS}</style>
-      <div style={{ textAlign: 'center' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
         <BoxIcon k='fridge' size={56} />
         <div style={{ fontWeight: 700, fontSize: 20, marginTop: 12 }}>HomeStock</div>
         <div style={{ color: textMuted, marginTop: 4, fontSize: 13 }}>読み込み中...</div>
