@@ -11,7 +11,7 @@ export default function SubScreens({
   newCatName, setNewCatName, newCatIcon, setNewCatIcon, newCatColor, setNewCatColor,
   cats, catIcons, catColors, friendIds, boxes, visibleBoxes,
   setScreen, showToast, lsSet,
-  handleRegister, handleLogin, handleLogout, addFriend,
+  handleRegister, handleLogin, handleLogout, addFriend, removeFriend,
   updateBox, addCat, deleteCat,
 }) {
   if (screen === 'auth') return (
@@ -132,10 +132,17 @@ export default function SubScreens({
               <div style={{ fontSize: 12, fontWeight: 600, color: textMuted, marginBottom: 6 }}>共有メンバー（{friendIds.length}名）</div>
               {friendIds.map(fid => {
                 const f = users[fid];
+                const boxCount = Object.values(boxes || {}).filter(b => b.ownerId === fid).length;
                 return (
                   <div key={fid} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid ' + border }}>
                     <div style={{ width: 32, height: 32, borderRadius: '50%', background: accentLight, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: accent }}>{f?.name?.[0] || '?'}</div>
-                    <span style={{ fontSize: 14, fontWeight: 500 }}>{f?.name || '(読み込み中)'}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 500 }}>{f?.name || '(読み込み中)'}</div>
+                      <div style={{ fontSize: 11.5, color: textMuted, marginTop: 2, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>…{fid.slice(-8)} ・ ボックス {boxCount}件</div>
+                    </div>
+                    <button onClick={() => {
+                      if (window.confirm(`${f?.name || '(unknown)'} との共有を解除しますか？`)) removeFriend(fid);
+                    }} style={{ background: '#fef2f2', border: 'none', color: danger, borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>解除</button>
                   </div>
                 );
               })}

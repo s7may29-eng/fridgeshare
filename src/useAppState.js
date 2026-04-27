@@ -298,6 +298,20 @@ export function useAppState() {
     showToast(target.name + 'さんと繋がりました！', 'success');
   };
 
+  // 不要な共有メンバーを解除（相手の同名別アカウント等を間違えて追加した場合）。
+  // 双方向の friends エントリを削除する。realtime listener が更新を反映する。
+  const removeFriend = async (friendId) => {
+    if (!session?.userId || !friendId) return;
+    try {
+      await remove(ref(db, 'friends/' + session.userId + '/' + friendId));
+      await remove(ref(db, 'friends/' + friendId + '/' + session.userId));
+      showToast('共有メンバーを解除しました', 'info');
+    } catch (e) {
+      console.error('removeFriend failed:', e);
+      showToast('解除に失敗しました', 'error');
+    }
+  };
+
   const createBox = async () => {
     if (!form.boxName?.trim()) return showToast('名前を入力してください', 'error');
     const id = genId();
@@ -526,7 +540,7 @@ export function useAppState() {
     cats, catIcons, catColors, box, boxEnabledCats, boxItems, shortageItems,
     visibleBoxes, filteredItems, expiredAll, expiringAll,
     showToast, saveSession, addCat, deleteCat, addShortage, removeShortage,
-    handleBought, handleRegister, handleLogin, handleLogout, addFriend,
+    handleBought, handleRegister, handleLogin, handleLogout, addFriend, removeFriend,
     createBox, updateBox, addItem, updateItem, deleteItem, openEditItem,
     handleEstimateExpiry, handleBarcode, handleReceipt, handleShortageBarcode,
     confirmAndAddScanned, getItemEmoji,
