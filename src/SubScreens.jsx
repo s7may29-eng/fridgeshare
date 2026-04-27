@@ -9,7 +9,7 @@ export default function SubScreens({
   inviteInput, setInviteInput, loading,
   geminiKey, setGeminiKey,
   newCatName, setNewCatName, newCatIcon, setNewCatIcon, newCatColor, setNewCatColor,
-  cats, catIcons, catColors,
+  cats, catIcons, catColors, friendIds,
   setScreen, showToast, lsSet,
   handleRegister, handleLogin, handleLogout, addFriend,
   updateBox, addCat, deleteCat,
@@ -127,17 +127,22 @@ export default function SubScreens({
         <div style={{ ...S.card, marginBottom: 12 }}>
           <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 16, letterSpacing: '-0.02em' }}>家族を追加</div>
           <p style={{ color: textMuted, fontSize: 13, marginTop: 4, marginBottom: 12, lineHeight: 1.5 }}>家族の招待コードを入力するとお互いのボックスを共有できます。</p>
-          {Object.keys(users).filter(uid => uid !== session?.userId).length > 0 && (
+          {(friendIds && friendIds.length > 0) ? (
             <div style={{ marginBottom: 12 }}>
-              {Object.keys(users).filter(uid => uid !== session?.userId).map(fid => {
+              <div style={{ fontSize: 12, fontWeight: 600, color: textMuted, marginBottom: 6 }}>共有メンバー（{friendIds.length}名）</div>
+              {friendIds.map(fid => {
                 const f = users[fid];
-                return f ? (
+                return (
                   <div key={fid} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid ' + border }}>
-                    <div style={{ width: 32, height: 32, borderRadius: '50%', background: accentLight, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: accent }}>{f.name?.[0]}</div>
-                    <span style={{ fontSize: 14, fontWeight: 500 }}>{f.name}</span>
+                    <div style={{ width: 32, height: 32, borderRadius: '50%', background: accentLight, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: accent }}>{f?.name?.[0] || '?'}</div>
+                    <span style={{ fontSize: 14, fontWeight: 500 }}>{f?.name || '(読み込み中)'}</span>
                   </div>
-                ) : null;
+                );
               })}
+            </div>
+          ) : (
+            <div style={{ marginBottom: 12, padding: '10px 12px', background: '#fafaf9', borderRadius: 8, fontSize: 12.5, color: textMuted, lineHeight: 1.5 }}>
+              共有メンバーはまだいません。下に相手の招待コードを入力してください。
             </div>
           )}
           <label style={S.label}>招待コードを入力</label>

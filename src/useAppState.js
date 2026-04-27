@@ -46,6 +46,7 @@ export function useAppState() {
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [guideStep, setGuideStep] = useState(null);
   const [friends, setFriends] = useState({});
+  const [allFriends, setAllFriends] = useState({});
   const [showCode, setShowCode] = useState(false);
   const [userCats, setUserCats] = useState(null);
   const [newCatName, setNewCatName] = useState('');
@@ -173,6 +174,10 @@ export function useAppState() {
         migrateBoxes(data);
       }),
       onValue(ref(db, 'friends/' + uid), snap => { setFriends(snap.val() || {}); }),
+      // 全 friends ツリーも監視。これにより片方向しか書かれていない場合や
+      // self-heal がまだ完了していないタイミングでも、相手側に自分が登録されていれば
+      // ボックスを共有可能にする（visibleBoxes 算出時にユニオンで判定）。
+      onValue(ref(db, 'friends'), snap => { setAllFriends(snap.val() || {}); }),
       onValue(ref(db, 'userCats/' + uid), snap => { setUserCats(snap.val() || null); }),
       onValue(ref(db, 'shortageList/' + uid), snap => { setShortageList(snap.val() || {}); }),
       onValue(ref(db, 'items'), snap => { setAllItems(snap.val() || {}); }),
@@ -471,8 +476,23 @@ export function useAppState() {
     setScannedItems([]); setScreen('box');
   };
 
-  const friendIds = Object.keys(friends);
-  const visibleBoxes = Object.values(boxes).filter(b => b.ownerId === session?.userId || friendIds.includes(b.ownerId));
+  // friends 関係の双方向ユニオン: 自分の friends に相手が居る場合と、
+  // 相手の friends に自分が居る場合の両方を採用する。これにより片方向の
+  // 関係でも家族間でボックス・在庫が共有される。
+  const friendIdSet = (() => {
+    const set = new Set(Object.keys(friends || {}));
+    const me = session?.userId;
+    if (me && allFriends) {
+      for (const [otherUid, theirFriends] of Object.entries(allFriends)) {
+        if (otherUid !== me && theirFriends && typeof theirFriends === 'object' && theirFriends[me]) {
+          set.add(otherUid);
+        }
+      }
+    }
+    return set;
+  })();
+  const friendIds = Array.from(friendIdSet);
+  const visibleBoxes = Object.values(boxes).filter(b => b.ownerId === session?.userId || friendIdSet.has(b.ownerId));
   const box = currentBox ? boxes[currentBox] : null;
   const boxEnabledCats = box?.enabledCats || cats;
   const boxItems = Object.values(items);
@@ -498,7 +518,7 @@ export function useAppState() {
     form, setForm, filterCat, setFilterCat, filterType, setFilterType, sortBy, setSortBy,
     inviteInput, setInviteInput, loading, confirmDelete, setConfirmDelete,
     geminiKey, setGeminiKey, scanning, scanMsg, scannedItems, setScannedItems,
-    showAddMenu, setShowAddMenu, guideStep, setGuideStep, friends, showCode, setShowCode,
+    showAddMenu, setShowAddMenu, guideStep, setGuideStep, friends, friendIds, showCode, setShowCode,
     userCats, newCatName, setNewCatName, newCatIcon, setNewCatIcon, newCatColor, setNewCatColor,
     shortageList, shortageForm, setShortageForm, showShortageAdd, setShowShortageAdd,
     buyingItem, setBuyingItem, buyBoxId, setBuyBoxId, estimatingExpiry,
