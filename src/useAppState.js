@@ -146,6 +146,24 @@ export function useAppState() {
   useEffect(() => {
     const uid = session?.userId;
     if (!uid) return;
+    // 片方向だけになっている friends 関係を双方向に修復する。過去の招待処理で
+    // どちらか一方の書き込みだけ成功して終わっていると、その方向からしかボックスが
+    // 見えず家族の在庫が反映されない。読み取った friends/ 全体を見て欠けている
+    // 方向を一括で書き戻す。realtime listener はこの後の更新で再度 fire する。
+    (async () => {
+      try {
+        const snap = await get(ref(db, 'friends'));
+        const all = snap.val() || {};
+        const mine = all[uid] || {};
+        const updates = {};
+        for (const [otherUid, theirFriends] of Object.entries(all)) {
+          if (otherUid === uid || !theirFriends || typeof theirFriends !== 'object') continue;
+          if (theirFriends[uid] && !mine[otherUid]) updates['friends/' + uid + '/' + otherUid] = true;
+          if (mine[otherUid] && !theirFriends[uid]) updates['friends/' + otherUid + '/' + uid] = true;
+        }
+        if (Object.keys(updates).length > 0) await update(ref(db), updates);
+      } catch (e) { console.warn('friends self-heal failed:', e); }
+    })();
     const unsubs = [
       onValue(ref(db, 'users/' + uid), snap => { if (snap.val()) setCurrentUser(snap.val()); }),
       onValue(ref(db, 'users'), snap => { if (snap.val()) setUsers(snap.val()); }),
