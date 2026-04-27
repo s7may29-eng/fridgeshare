@@ -13,6 +13,10 @@ export default function HomeScreen({
   showToast, addShortage, removeShortage, handleBought, createBox,
   handleShortageBarcode, shortageBarcodeRef, getItemEmoji,
 }) {
+  const ownerLabel = (uid) => {
+    if (!uid || uid === session?.userId) return null;
+    return users?.[uid]?.name || null;
+  };
   const [showAlertAdd, setShowAlertAdd] = React.useState(false);
   const [alertForm, setAlertForm] = React.useState({ name: '', quantity: '1', unit: '個' });
   const alertBarcodeRef = React.useRef(null);
@@ -128,19 +132,24 @@ export default function HomeScreen({
           )}
           {shortageItems.length === 0 ? (
             <div style={{ ...S.card, textAlign: 'center', padding: '18px 20px', color: textMuted, fontSize: 14 }}>在庫切れアイテムはありません</div>
-          ) : shortageItems.map(item => (
-            <div key={item.id} style={{ ...S.card, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
+          ) : shortageItems.map(item => {
+            const byName = ownerLabel(item._ownerUid);
+            return (
+            <div key={(item._ownerUid || '') + ':' + item.id} style={{ ...S.card, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{ fontSize: 26 }}>{getItemEmoji(item.name) || '🛒'}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: 15, letterSpacing: '-0.01em' }}>{item.name}</div>
-                <div style={{ color: textMuted, fontSize: 13, marginTop: 2 }}>{item.quantity}{item.unit}</div>
+                <div style={{ color: textMuted, fontSize: 13, marginTop: 2 }}>
+                  {item.quantity}{item.unit}
+                  {byName && <span style={{ marginLeft: 8, fontSize: 11.5, color: '#a3a3a3' }}>by {byName}</span>}
+                </div>
               </div>
               <button onClick={() => { setBuyingItem(item); setBuyBoxId(visibleBoxes[0]?.id || ''); }}
                 style={{ background: '#dcfce7', border: 'none', color: '#15803d', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', letterSpacing: '-0.01em' }}>購入した</button>
-              <button onClick={() => removeShortage(item.id)} aria-label='削除'
+              <button onClick={() => removeShortage(item.id, item._ownerUid)} aria-label='削除'
                 style={{ background: '#fef2f2', border: 'none', color: danger, borderRadius: 8, padding: '8px 10px', cursor: 'pointer', fontSize: 14 }}>🗑</button>
             </div>
-          ))}
+          );})}
         </div>
 
         {/* 在庫ボックス */}

@@ -9,7 +9,7 @@
 // or broken previous bundle recover automatically on first visit after deploy.
 //
 // Bump CACHE on every release to invalidate previously cached assets.
-const CACHE = 'fridgeshare-v4';
+const CACHE = 'fridgeshare-v5';
 
 self.addEventListener('install', () => {
   self.skipWaiting();

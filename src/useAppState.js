@@ -52,7 +52,7 @@ export function useAppState() {
   const [newCatName, setNewCatName] = useState('');
   const [newCatIcon, setNewCatIcon] = useState('📦');
   const [newCatColor, setNewCatColor] = useState('#f1f5f9');
-  const [shortageList, setShortageList] = useState({});
+  const [shortageMap, setShortageMap] = useState({});
   const [shortageForm, setShortageForm] = useState({ name: '', quantity: '1', unit: '個' });
   const [showShortageAdd, setShowShortageAdd] = useState(false);
   const [buyingItem, setBuyingItem] = useState(null);
@@ -179,7 +179,6 @@ export function useAppState() {
       // ボックスを共有可能にする（visibleBoxes 算出時にユニオンで判定）。
       onValue(ref(db, 'friends'), snap => { setAllFriends(snap.val() || {}); }),
       onValue(ref(db, 'userCats/' + uid), snap => { setUserCats(snap.val() || null); }),
-      onValue(ref(db, 'shortageList/' + uid), snap => { setShortageList(snap.val() || {}); }),
       onValue(ref(db, 'items'), snap => { setAllItems(snap.val() || {}); }),
     ];
     return () => { unsubs.forEach(u => { try { u(); } catch (_) {} }); };
@@ -190,6 +189,36 @@ export function useAppState() {
     const unsub = onValue(ref(db, 'items/' + currentBox), snap => { setItems(snap.val() || {}); });
     return () => { try { unsub(); } catch (_) {} };
   }, [currentBox]);
+
+  // 期限アラート＋追加・買い物リスト＋追加で書き込む shortageList を、
+  // 自分と全共有メンバーから購読してユニオンで表示する。これによりどの家族が
+  // 追加した買い物メモも全員のホーム画面に出る。
+  useEffect(() => {
+    const uid = session?.userId;
+    if (!uid) return;
+    const friendUids = new Set(Object.keys(friends || {}));
+    for (const [otherUid, theirFriends] of Object.entries(allFriends || {})) {
+      if (otherUid !== uid && theirFriends && typeof theirFriends === 'object' && theirFriends[uid]) {
+        friendUids.add(otherUid);
+      }
+    }
+    const targets = [uid, ...Array.from(friendUids)];
+    const unsubs = [];
+    for (const t of targets) {
+      const off = onValue(ref(db, 'shortageList/' + t), snap => {
+        const data = snap.val() || {};
+        setShortageMap(prev => ({ ...prev, [t]: data }));
+      });
+      unsubs.push(off);
+    }
+    // メンバーから外れた user のエントリは破棄（解除直後にゴミが残らないように）
+    setShortageMap(prev => {
+      const next = {};
+      for (const t of targets) if (prev[t]) next[t] = prev[t];
+      return next;
+    });
+    return () => { unsubs.forEach(u => { try { u(); } catch (_) {} }); };
+  }, [session?.userId, friends, allFriends]);
 
   const saveCats = async (newCats) => {
     setUserCats(newCats);
@@ -212,12 +241,14 @@ export function useAppState() {
 
   const addShortage = async (item) => {
     const id = genId();
-    await set(ref(db, 'shortageList/' + session.userId + '/' + id), { id, name: item.name, quantity: item.quantity || '1', unit: item.unit || '個', addedAt: Date.now() });
+    await set(ref(db, 'shortageList/' + session.userId + '/' + id), { id, name: item.name, quantity: item.quantity || '1', unit: item.unit || '個', addedBy: session.userId, addedAt: Date.now() });
     showToast(item.name + 'を在庫切れリストに追加しました', 'success');
   };
 
-  const removeShortage = async (id) => {
-    await remove(ref(db, 'shortageList/' + session.userId + '/' + id));
+  // ownerUid を明示的に受け取る。共有メンバーが追加した買い物メモを削除する場合は
+  // そのメンバーの shortageList サブツリーから消す必要がある。
+  const removeShortage = async (id, ownerUid) => {
+    await remove(ref(db, 'shortageList/' + (ownerUid || session.userId) + '/' + id));
   };
 
   const handleBought = async (shortage) => {
@@ -229,7 +260,7 @@ export function useAppState() {
       expiry: '', purchaseDate: today(), note: '',
       addedBy: session.userId, addedAt: Date.now(), updatedAt: Date.now()
     });
-    await removeShortage(shortage.id);
+    await removeShortage(shortage.id, shortage._ownerUid);
     setBuyingItem(null); setBuyBoxId('');
     showToast(shortage.name + 'を在庫に追加しました！', 'success');
   };
@@ -510,7 +541,18 @@ export function useAppState() {
   const box = currentBox ? boxes[currentBox] : null;
   const boxEnabledCats = box?.enabledCats || cats;
   const boxItems = Object.values(items);
-  const shortageItems = Object.values(shortageList);
+  // shortageList: 自分＋共有メンバー全員の shortageList をユニオンで表示。
+  // 各 item に _ownerUid を付与し、削除/購入完了時に正しいユーザーの subtree から消せるようにする。
+  const shortageList = (() => {
+    const out = {};
+    for (const [ownerUid, m] of Object.entries(shortageMap || {})) {
+      for (const [iid, item] of Object.entries(m || {})) {
+        out[ownerUid + ':' + iid] = { ...item, _ownerUid: ownerUid };
+      }
+    }
+    return out;
+  })();
+  const shortageItems = Object.values(shortageList).sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
 
   const visibleBoxIds = visibleBoxes.map(b => b.id);
   const allVisibleItems = visibleBoxIds.flatMap(bid => Object.values(allItems[bid] || {}));
