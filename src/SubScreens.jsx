@@ -10,22 +10,21 @@ export default function SubScreens({
   geminiKey, setGeminiKey,
   newCatName, setNewCatName, newCatIcon, setNewCatIcon, newCatColor, setNewCatColor,
   cats, catIcons, catColors, friendIds, boxes, visibleBoxes,
-  setScreen, showToast, lsSet,
+  setScreen, setGuideStep, showToast, lsSet,
   handleRegister, handleLogin, handleLogout, addFriend, removeFriend,
   updateBox, addCat, deleteCat,
 }) {
   if (screen === 'auth') return (
     <div style={S.app}>
       <div style={S.wrap}>
-        <div style={{ paddingTop: 64, paddingBottom: 40, textAlign: 'center' }}>
-          <div style={{ display: 'inline-flex', background: accentLight, borderRadius: 16, padding: 16, marginBottom: 18, border: '1px solid #e7e5e4' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 64, paddingBottom: 40 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: accentLight, borderRadius: 16, padding: 16, marginBottom: 18, border: '1px solid #e7e5e4', boxSizing: 'content-box', width: 44, height: 44 }}>
             <BoxIcon k='fridge' size={44} />
           </div>
-          <h1 style={{ fontSize: 34, fontWeight: 800, margin: '0 0 6px', letterSpacing: '-0.045em', display: 'flex', justifyContent: 'center', alignItems: 'baseline', gap: 1 }}>
-            <span>Home</span>
-            <span style={{ fontWeight: 400, color: textMuted }}>Stock</span>
+          <h1 style={{ fontSize: 34, fontWeight: 800, margin: '0 0 6px', letterSpacing: '-0.045em', textAlign: 'center' }}>
+            <span>Home</span><span style={{ fontWeight: 400, color: textMuted }}>Stock</span>
           </h1>
-          <p style={{ color: textMuted, fontSize: 13.5, margin: 0, letterSpacing: '0.02em', fontWeight: 500 }}>家族みんなで在庫を管理</p>
+          <p style={{ color: textMuted, fontSize: 13.5, margin: 0, letterSpacing: '0.02em', fontWeight: 500, textAlign: 'center' }}>家族みんなで在庫を管理</p>
         </div>
         <div style={{ display: 'flex', gap: 4, marginBottom: 24, background: '#f0efed', borderRadius: 10, padding: 3 }}>
           {['login', 'register'].map(m => (
@@ -118,6 +117,11 @@ export default function SubScreens({
           <button onClick={() => setScreen(currentBox ? 'box' : 'home')} style={S.iconBtn}>← 戻る</button>
           <span style={{ fontWeight: 700, fontSize: 16 }}>設定</span>
           <div style={{ width: 60 }} />
+        </div>
+        <div style={{ ...S.card, marginBottom: 12 }}>
+          <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 16, letterSpacing: '-0.02em' }}>使い方ガイド</div>
+          <p style={{ color: textMuted, fontSize: 13, marginTop: 4, marginBottom: 12, lineHeight: 1.5 }}>このアプリの使い方や家族との共有手順を最初から確認できます。</p>
+          <button className='pressable' style={S.btnGhost} onClick={() => { setGuideStep(0); setScreen('guide'); }}>ガイドを開く</button>
         </div>
         <div style={{ ...S.card, marginBottom: 12 }}>
           <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 16, letterSpacing: '-0.02em' }}>カテゴリ管理</div>
