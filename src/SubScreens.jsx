@@ -9,7 +9,7 @@ export default function SubScreens({
   inviteInput, setInviteInput, loading,
   geminiKey, setGeminiKey,
   newCatName, setNewCatName, newCatIcon, setNewCatIcon, newCatColor, setNewCatColor,
-  cats, catIcons, catColors, friendIds,
+  cats, catIcons, catColors, friendIds, boxes, visibleBoxes,
   setScreen, showToast, lsSet,
   handleRegister, handleLogin, handleLogout, addFriend,
   updateBox, addCat, deleteCat,
@@ -148,6 +148,31 @@ export default function SubScreens({
           <label style={S.label}>招待コードを入力</label>
           <input style={S.input} placeholder='XX-XX-XX-XX' value={inviteInput} onChange={e => setInviteInput(e.target.value)} />
           <button className='pressable' style={S.btn()} onClick={addFriend}>追加する</button>
+          <details style={{ marginTop: 12, fontSize: 12, color: textMuted }}>
+            <summary style={{ cursor: 'pointer', userSelect: 'none' }}>共有状態の詳細</summary>
+            <div style={{ padding: '8px 4px 0', lineHeight: 1.7, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 11.5, wordBreak: 'break-all' }}>
+              {(() => {
+                const myId = session?.userId;
+                const owners = {};
+                Object.values(boxes || {}).forEach(b => {
+                  const oid = b.ownerId || '(なし)';
+                  owners[oid] = (owners[oid] || 0) + 1;
+                });
+                const fSet = new Set(friendIds || []);
+                const lines = [];
+                lines.push(`自分のID: …${(myId || '').slice(-8)}`);
+                lines.push(`共有メンバー数: ${(friendIds || []).length}`);
+                lines.push(`全ボックス: ${Object.keys(boxes || {}).length} / 表示中: ${(visibleBoxes || []).length}`);
+                lines.push('--- ボックスのオーナー別件数 ---');
+                Object.entries(owners).forEach(([oid, n]) => {
+                  const tag = oid === myId ? '自分' : fSet.has(oid) ? '共有メンバー' : '★非共有';
+                  const name = users?.[oid]?.name || '(unknown)';
+                  lines.push(`[${tag}] …${oid.slice(-8)} ${name}: ${n}件`);
+                });
+                return lines.map((l, i) => <div key={i}>{l}</div>);
+              })()}
+            </div>
+          </details>
         </div>
         <div style={{ ...S.card, marginBottom: 12 }}>
           <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 16, letterSpacing: '-0.02em' }}>Gemini APIキー</div>
